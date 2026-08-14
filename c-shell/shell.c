@@ -29,6 +29,15 @@ void print_prompt() {
         perror("getcwd");
         exit(EXIT_FAILURE);
     }
+    // Handling the two cases - when the home directory as an ancestor of the pwd, and when it's not an ancestor of the pwd!
+    if(strcmp(current_dir, shell_home) == 0) {
+        printf("<%s@%s:~> ", pw->pw_name, hostname);
+        return;
+    }
+    if(strncmp(current_dir, shell_home, strlen(shell_home)) == 0 && current_dir[strlen(shell_home)] == '/') {
+        printf("<%s@%s:~%s> ", pw->pw_name, hostname, current_dir + strlen(shell_home));
+        return;
+    }
     printf("<%s@%s:%s> ", pw->pw_name, hostname, current_dir);
 }
 
