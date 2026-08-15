@@ -147,6 +147,17 @@ Token *lex(const char *input) {
                 i++;
                 continue;
             }
+            // \ escapes any character following it!
+            if(input[i] == '\\') {
+                if(input[i + 1] == '\0' || input[i + 1] == '\n') {
+                    free_tokens(head);
+                    return NULL;
+                }
+                // Append the character following the \, the \ itself is omitted!
+                append_char(word, &word_length, input[i + 1]);
+                i += 2;
+                continue;
+            }
             append_char(word, &word_length, input[i]);
             i++;
         }
