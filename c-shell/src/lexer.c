@@ -2,7 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdbool.h>
 #include "lexer.h"
+static bool is_operator(char c) {
+    return c == '|' || c == '&' || c == ';' || c == '<' || c == '>';
+}
 
 static Token *create_token(TokenType type, const char *value) {
     // Allocating memory for the token struct!
@@ -49,8 +53,42 @@ Token *lex(const char *input) {
             i++;
             continue;
         }
+        // Detecting the various operators!
+        if(input[i] == '|') {
+            append_token(&head, &tail, create_token(TOKEN_PIPE, NULL));
+            i++;
+            continue;
+        }
+        if(input[i] == '&') {
+            append_token(&head, &tail, create_token(TOKEN_AMP, NULL));
+            i++;
+            continue;
+        }
+        if(input[i] == ';') {
+            append_token(&head, &tail, create_token(TOKEN_SEMI, NULL));
+            i++;
+            continue;
+        }
+        if(input[i] == '<') {
+            append_token(&head, &tail, create_token(TOKEN_LT, NULL));
+            i++;
+            continue;
+        }
+        // Special case - if TOKEN_GT is detected, it could either be TOKEN_GT | TOKEN_GTGT!
+        if(input[i] == '>') {
+            if(input[i + 1] == '>') {
+                append_token(&head, &tail, create_token(TOKEN_GTGT, NULL));
+                i += 2;
+            }
+            else {
+                append_token(&head, &tail, create_token(TOKEN_GT, NULL));
+                i++;
+            }
+            continue;
+        }
+
         size_t start = i;
-        while(input[i] != '\0' && !isspace((unsigned char)input[i])) {
+        while(input[i] != '\0' && !isspace((unsigned char)input[i]) && !is_operator(input[i])) {
             i++;
         }
         size_t length = i - start;
