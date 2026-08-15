@@ -6,6 +6,7 @@
 #include <pwd.h>
 #include <string.h>
 #include "prompt.h"
+#include "lexer.h"
 
 int main()
 {
@@ -16,6 +17,9 @@ int main()
         if(fgets(input, sizeof(input), stdin) == NULL) {
             break;
         }
+        Token *tokens = lex(input);
+        print_tokens(tokens);
+        free_tokens(tokens);
     }
     return 0;
 }

@@ -10,7 +10,7 @@ CFLAGS = -std=c99 \
 INCLUDES = -Iinclude
 
 TARGET = shell.out
-SRC = src/main.c src/prompt.c
+SRC = src/main.c src/prompt.c src/lexer.c
 
 .PHONY: all clean
 
