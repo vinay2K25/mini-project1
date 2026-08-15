@@ -233,4 +233,33 @@ static FrecencyEntry *load_frecency() {
         }
         printf("hop: no such directory\n");
     }
+    // Executing the hop built-in!
+    static void execute_hop(Token *tokens) {
+        Token *current = tokens->next;
+        // No arg after hop indicates hop home!
+        if(current == NULL) {
+            hop_one("~");
+            return;
+        }
+        while(current != NULL) {
+            // Every token following hop must be TOKEN_WORD!
+            // Only process TOKEN_WORD belong-ing to the cmd!
+            if(current->type != TOKEN_WORD) {
+                break;
+            }
+            hop_one(current->value);
+            current = current->next;
+        }
+    }
+    // Determine whether curr cmd is a built-in or not - ret true if so, else false if it needs to be handled in some other case!
+    bool execute_builtin(Token *tokens) {
+        if(tokens == NULL || tokens->type != TOKEN_WORD) {
+            return false;
+        }
+        if(strcmp(tokens->value, "hop") == 0) {
+            execute_hop(tokens);
+            return true;
+        }
+        return false;
+    }
 }
