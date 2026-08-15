@@ -113,6 +113,40 @@ Token *lex(const char *input) {
                 i++;
                 continue;
             }
+            if(input[i] == '"') {
+                i++;
+                while(input[i] != '\0' && input[i] != '"') {
+                    // Two special escape sequences exist - "\\" which translates to "\" and "\"" which translates to """!
+                    if(input[i] == '\\') {
+                        if(input[i + 1] == '\\') {
+                            append_char(word, &word_length, '\\');
+                            i += 2;
+                            continue;
+                        }
+                        if(input[i + 1] == '"') {
+                            append_char(word, &word_length, '"');
+                            i += 2;
+                            continue;
+                        }
+                        // Say "\n" is the input - then both \ and 'n' must be appended to word!
+                        append_char(word, &word_length, '\\');
+                        i++;
+                        if(input[i] != '\0') {
+                            append_char(word, &word_length, input[i]);
+                            i++;
+                        }
+                    }
+                    append_char(word, &word_length, input[i]);
+                    i++;
+                }
+                // No closing " was detected, a lexical error!
+                if(input[i] == '\0') {
+                    free_tokens(head);
+                    return NULL;
+                }
+                i++;
+                continue;
+            }
             append_char(word, &word_length, input[i]);
             i++;
         }
