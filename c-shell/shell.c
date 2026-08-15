@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <unistd.h>
 #include <limits.h>
 #include <pwd.h>
@@ -44,6 +45,12 @@ void print_prompt() {
 int main()
 {
     initialise_shell();
-    print_prompt();
+    char input[4096];
+    while(true) {
+        print_prompt();
+        if(fgets(input, sizeof(input), stdin) == NULL) {
+            break;
+        }
+    }
     return 0;
 }
