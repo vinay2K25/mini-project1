@@ -20,7 +20,7 @@ int main()
         Token *tokens = lex(input);
         // Informing the user of a lexical error, that is, an error in their command-syntax!
         if(tokens == NULL) {
-            printf("C-Shell: Invalid Syntax\n");
+            printf("cshell: invalid syntax\n");
             continue;
         }
         print_tokens(tokens);
