@@ -98,5 +98,48 @@ static FrecencyEntry *load_frecency() {
         }
         fclose(file);
     }
-    
+    // Free-ing up the frecency linked-list!
+    static void free_frecency(FrecencyEntry *head) {
+        while(head != NULL) {
+            FrecencyEntry *next = head->next;
+            free(head);
+            head = next;
+        }
+    }
+    // Record-ing details of a successful visit to a path!
+    static void record_visit(const char *path) {
+        FrecencyEntry *head = load_frecency();
+        FrecencyEntry *entry = head;
+        while(entry != NULL) {
+            if(strcmp(entry->path, path) == 0) {
+                break;
+            }
+            entry = entry->next;
+        }
+        if(entry == NULL) {
+            entry = malloc(sizeof(FrecencyEntry));
+            if(entry == NULL) {
+                free_frecency(head);
+                exit(EXIT_FAILURE);
+            }
+            snprintf(entry->path, sizeof(entry->path), "%s", path);
+            entry->frequency = 0;
+            entry->last_visit = 0;
+            entry->next = head;
+            head = entry;
+        }
+        entry->frequency++;
+        visit_counter++;
+        entry->last_visit = visit_counter;
+        save_frecency(head);
+        free_frecency(head);
+    }
+    // Determining whether a path exists and is a directory!
+    static bool is_directory(const char *path) {
+        struct stat information;
+        if(stat(path, &information) == -1) {
+            return false;
+        }
+        return S_ISDIR(information, st_mode);
+    }
 }
