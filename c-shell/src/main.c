@@ -8,9 +8,11 @@
 #include "prompt.h"
 #include "lexer.h"
 #include "parser.h"
+#include "builtins.h"
 int main()
 {
     initialise_shell();
+    initialise_builtins();
     char input[4096];
     while(true) {
         print_prompt();
@@ -27,9 +29,14 @@ int main()
         bool parse_result = parse(tokens);
         if(!parse_result) {
             printf("cshell: invalid syntax\n");
+            free_tokens(tokens);
+            continue;
         }
-        printf("parse: %s\n", parse_result ? "valid" : "invalid");
-        print_tokens(tokens);
+        // De-bugging func!
+        // printf("parse: %s\n", parse_result ? "valid" : "invalid");
+        // print_tokens(tokens);
+
+        execute_builtin(tokens);
         free_tokens(tokens);
     }
     return 0;
