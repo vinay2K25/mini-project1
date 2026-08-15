@@ -189,4 +189,48 @@ static FrecencyEntry *load_frecency() {
         free_frecency(head);
         return true;
     }
+    // Process one hop arg!
+    static void hop_one(const char *argument) {
+        // Change cwd to shell's home dir!
+        if(strcmp(argument, "~") == 0) {
+            if(!change_directory(home_directory)) {
+                printf("hop: no such directory\n");
+            }
+            return;
+        }
+        // Do nothing, stay in cwd!
+        if(strcmp(argument, ".") == 0) {
+            return;
+        }
+        // Move to the parent dir!
+        // The chdir("..") cmd leaves us at root in-case we're already at root dir, this is desirable!
+        if(strcmp(argument, "..") == 0) {
+            if(!change_directory("..")) {
+                printf("hop: no such directory\n");
+            }
+            return;
+        }
+        // Move to the prev cwd!
+        if(strcmp(argument, "-") == 0) {
+            if(!has_previous_directory) {
+                return;
+            }
+            if(!change_directory(previous_directory)) {
+                printf("hop: no such directory\n");
+            }
+            return;
+        }
+        // Interpret the arg directly rel to cwd or as an abs path!
+        if(change_directory(argument)) {
+            return;
+        }
+        // Dir resolution failed, fall back to frecency!
+        char match[PATH_MAX];
+        if(frecency_lookup(argument, match, sizeof(match))) {
+            if(change_directory(match)) {
+                return;
+            }
+        }
+        printf("hop: no such directory\n");
+    }
 }
