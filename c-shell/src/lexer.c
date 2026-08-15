@@ -49,10 +49,11 @@ static void append_token(Token **head, Token **tail, Token *token) {
     }
 }
 
-Token *lex(const char *input) {
+Token *lex(const char *input, bool *lex_error) {
     Token *head = NULL;
     Token *tail = NULL;
     size_t i = 0;
+    (*lex_error) = false;
     while(input[i] != '\0') {
         if(isspace((unsigned char)input[i])) {
             i++;
@@ -107,6 +108,7 @@ Token *lex(const char *input) {
                 }
                 // We've reached the end of the input without detecting a closing single quote, this is a lexical error! 
                 if(input[i] == '\0') {
+                    (*lex_error) = true;
                     free_tokens(head);
                     return NULL;
                 }
@@ -141,6 +143,7 @@ Token *lex(const char *input) {
                 }
                 // No closing " was detected, a lexical error!
                 if(input[i] == '\0') {
+                    (*lex_error) = true;
                     free_tokens(head);
                     return NULL;
                 }
@@ -150,6 +153,7 @@ Token *lex(const char *input) {
             // \ escapes any character following it!
             if(input[i] == '\\') {
                 if(input[i + 1] == '\0' || input[i + 1] == '\n') {
+                    (*lex_error) = true;
                     free_tokens(head);
                     return NULL;
                 }

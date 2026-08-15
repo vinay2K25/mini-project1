@@ -1,5 +1,6 @@
 #ifndef LEXER_H
 #define LEXER_H
+#include <stdbool.h>
 
 typedef enum {
     TOKEN_WORD,
@@ -17,7 +18,7 @@ typedef struct Token {
     struct Token *next;
 } Token;
 
-Token *lex(const char *input);
+Token *lex(const char *input, bool *lex_error);
 
 // De-bugging function to test the lexer!
 void print_tokens(Token *tokens);
