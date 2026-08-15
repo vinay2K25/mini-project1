@@ -4,6 +4,11 @@
 #include <ctype.h>
 #include <stdbool.h>
 #include "lexer.h"
+static void append_char(char *word, size_t *length, char c) {
+    word[*length] = c;
+    (*length)++;
+}
+
 static bool is_operator(char c) {
     return c == '|' || c == '&' || c == ';' || c == '<' || c == '>';
 }
@@ -87,21 +92,32 @@ Token *lex(const char *input) {
             continue;
         }
 
-        size_t start = i;
-        while(input[i] != '\0' && !isspace((unsigned char)input[i]) && !is_operator(input[i])) {
+        char word[4096];
+        size_t word_length = 0;
+        
+        while(input[i] != '\0') {
+            if(isspace((unsigned char)input[i]) || is_operator(input[i])) {
+                break;
+            }
+            if(input[i] == '\'') {
+                i++;
+                while(input[i] != '\0' && input[i] != '\'') {
+                    append_char(word, &word_length, input[i]);
+                    i++;
+                }
+                // We've reached the end of the input without detecting a closing single quote, this is a lexical error! 
+                if(input[i] == '\0') {
+                    free_tokens(head);
+                    return NULL;
+                }
+                i++;
+                continue;
+            }
+            append_char(word, &word_length, input[i]);
             i++;
         }
-        size_t length = i - start;
-        char *word = malloc(length + 1);
-        if(word == NULL) {
-            perror("malloc");
-            free_tokens(head);
-            exit(EXIT_FAILURE);
-        }
-        memcpy(word, input + start, length);
-        word[length] = '\0';
+        word[word_length] = '\0';
         Token *token = create_token(TOKEN_WORD, word);
-        free(word);
         append_token(&head, &tail, token);
     }
     return head;
