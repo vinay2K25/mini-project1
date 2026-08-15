@@ -7,15 +7,17 @@ CFLAGS = -std=c99 \
          -Wno-unused-parameter \
          -fno-asm
 
+INCLUDES = -Iinclude
+
 TARGET = shell.out
-SRC = shell.c
+SRC = src/main.c src/prompt.c
 
 .PHONY: all clean
 
 all: $(TARGET)
 
 $(TARGET): $(SRC)
-	$(CC) $(CFLAGS) $(SRC) -o $(TARGET)
+	$(CC) $(CFLAGS) $(INCLUDES) $(SRC) -o $(TARGET)
 
 clean:
 	rm -f $(TARGET)

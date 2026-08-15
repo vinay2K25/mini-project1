@@ -5,6 +5,8 @@
 #include <limits.h>
 #include <pwd.h>
 #include <string.h>
+#include "prompt.h"
+
 static char shell_home[PATH_MAX];
 
 void initialise_shell() {
@@ -40,17 +42,4 @@ void print_prompt() {
         return;
     }
     printf("<%s@%s:%s> ", pw->pw_name, hostname, current_dir);
-}
-
-int main()
-{
-    initialise_shell();
-    char input[4096];
-    while(true) {
-        print_prompt();
-        if(fgets(input, sizeof(input), stdin) == NULL) {
-            break;
-        }
-    }
-    return 0;
 }
