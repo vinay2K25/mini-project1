@@ -142,4 +142,51 @@ static FrecencyEntry *load_frecency() {
         }
         return S_ISDIR(information, st_mode);
     }
+    // Perform-ing dir change and updating all states associated with hop!
+    static bool change_directory(const char *path) {
+        char old_directory[PATH_MAX];
+        if(getcwd(old_directory, sizeof(old_directory)) == NULL) {
+            return false;
+        }
+        if(chdir(path) == -1) {
+            return false;
+        }
+        char new_directory[PATH_MAX];
+        // We're already in the new dir, keep the shell usable!
+        if(getcwd(new_directory, sizeof(new_directory)) == NULL) {
+            return true;
+        }
+        snprintf(previous_directory, sizeof(previous_directory), "%s", old_directory);
+        has_previous_directory = true;
+        record_visit(new_directory);
+        return true;
+    }
+    // Return best frecency match for a name!
+    static bool frecency_lookup(const char *name, char *result, size_t size) {
+        FrecencyEntry *head = load_frecency();
+        FrecencyEntry *best = NULL;
+        long long best_score = -1;
+        for(FrecencyEntry *entry = head; entry != NULL; entry = entry->next) {
+            // Requested name must occur some-where when traversing the linked-list!
+            if(strstr(entry->path, name) == NULL) {
+                continue;
+            }
+            // The dir may have been deleted since it was recorded!
+            if(!is_directory(entry->path)) {
+                continue;
+            }
+            long long score = entry->frequency * 1000000LL + entry->last_visit;
+            if(best == NULL || score > best_score) {
+                best = entry;
+                best_score = score;
+            }
+        }
+        if(best == NULL) {
+            free_frecency(head);
+            return false;
+        }
+        snprintf(result, size, "%s", best->path);
+        free_frecency(head);
+        return true;
+    }
 }
