@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <errno.h>
 
+// PATH_MAX
 // File to store the frecencies of the directories!
 #define FRECENCY_FILE ".cshell_frecency"
 
@@ -372,3 +373,47 @@ static RevealEntry read_reveal_entries(const char *directory, bool show_hidden, 
     return entries;
 }
 
+// Clean-up helper!
+static void free_reveal_entries(RevealEntry *entries, size_t count) {
+    for(size_t i = 0; i < count; i++) {
+        free(entries[i].name);
+    }
+    free(entries);
+}
+
+// Recursive print func!
+static void reveal_directory(const char *directory, bool show_hidden, bool recursive, const char *display_prefix) {
+    size_t count = 0;
+    RevealEntry *entries = read_reveal_entries(directory, show_hidden, &count);
+    if(entries == NULL) {
+        return;
+    }
+    for(size_t i = 0; i < count; i++) {
+        char full_path[PATH_MAX];
+        int written = snprintf(full_path, sizeof(full_path), "%s/%s", directory, entries[i].name);
+        if(written < 0 || (size_t)written >= sizeof(full_path)) {
+            continue;
+        }
+        // Constructing the path shown to user - at top lvl direct files, followed by nested dir!
+        char display_path[PATH_MAX];
+        if(display_prefix == NULL || display_prefix[0] == '\0') {
+            snprintf(display_path, sizeof(display_path), "%s", entries[i].name);
+        }
+        else {
+            snprintf(display_path, sizeof(display_path), "%s/%s", display_prefix, entries[i].name);
+        }
+        if(entries[i].is_directory) {
+            printf("%s/\n", display_path);    
+        }
+        else {
+            printf("%s\n", display_path);
+        }
+        // -t flag indicates to recursively reveal sub-dir!
+        if(recursive && entries[i].is_directory) {
+            char child_prefix[PATH_MAX];
+            snprintf(child_prefix, sizeof(child_prefix), "%s", display_path);
+            reveal_directory(full_path, show_hidden, recursive, child_prefix);
+        }
+    }
+    free_reveal_entries(entries, count);
+}
