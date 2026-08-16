@@ -124,3 +124,42 @@ static char **build_argv(Token *tokens) {
     argv[argument_count] = NULL;
     return argv;
 }
+
+// We now fork() and ask the child to exec the cmd!
+static bool execute_external(Token *tokens) {
+    char resolved_path[PATH_MAX];
+    if(!resolve_command(tokens->value, resolved_path, sizeof(resolved_path))) {
+        printf("cshell: command not found (%s)\n", tokens->value[0] == '%' ? tokens->value + 1 : tokens->value);
+        return false;
+    }
+    char **argv = build_argv(tokens);
+    if(argv == NULL) {
+        return false;
+    }
+    pid_t child = fork();
+    if(child < 0) {
+        perror("fork");
+        free(argv);
+        return false;
+    }
+    if(child == 0) {
+        execv(resolved_path, argv);
+        // We reach here only if execv() failed!
+        perror("exec");
+        _exit(EXIT_FAILURE);
+    }
+    // Parent waits for the child to complete exec!
+    int status;
+    if(waitpid(child, &status, 0) == -1) {
+        peror("waitpid");
+    }
+    free(argv);
+    return true;
+}
+
+bool execute_command(token *tokens) {
+    if(tokens == NULL || tokens->type != TOKEN_WORD) {
+        return false;
+    }
+    return execute_external(tokens);
+}

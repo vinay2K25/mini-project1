@@ -9,6 +9,7 @@
 #include "lexer.h"
 #include "parser.h"
 #include "builtins.h"
+#include "executor.h"
 int main()
 {
     initialise_shell();
@@ -36,7 +37,9 @@ int main()
         // printf("parse: %s\n", parse_result ? "valid" : "invalid");
         // print_tokens(tokens);
 
-        execute_builtin(tokens);
+        if(!execute_builtin(tokens)) {
+            execute_command(tokens);
+        }
         free_tokens(tokens);
     }
     return 0;
