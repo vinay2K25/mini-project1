@@ -846,6 +846,91 @@ static void peek_file(const char *filename, bool numbered, bool reverse) {
     close(fd);
 }
 
+// Handling stdin - peak and peak - indicate stdin!
+static void peek_stdin(bool numbered, bool reverse) {
+    if(!reverse) {
+        if(numbered) {
+            peek_forward_numbered(STDIN_FILENO);
+        }
+        else {
+            peek_forward(STDIN_FILENO);
+        }
+        return;
+    }
+    peek_reverse_stream(STDIN_FILENO, numbered);
+}
+
+// Parsing the peek flags!
+static bool parse_peek_flag(const char *argument, bool *numbered, bool *reverse) {
+    if(argument[0] != '-' || argument[1] == '\0') {
+        return false;
+    }
+    for(size_t i = 1; argument[i] ! '\0'; i++) {
+        if(argument[i] == 'n') {
+            *numbered = true;
+        }
+        else if(argument[i] == 'r') {
+            *reverse = true;
+        }
+        else {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void execute_peek(Token *tokens) {
+    bool numbered = false;
+    bool reverse = false;
+    size_t file_count = 0;
+    Token *current = tokens->next;
+    while(current != NULL) {
+        if(current->type != TOKEN_WORD) {
+            return;
+        }
+        // '-' by itself indicates stdin!
+        if(strcmp(current->value, "-") == 0) {
+            file_count++;
+        }
+        // Anything else beginning with '-' is a flag!
+        else if(current->value[0] == '-') {
+            if(!parse_peek_flag(current->value, &numbered, &reverse)) {
+                printf("peek: invalid syntax\n");
+                return;
+            }
+        }
+        else {
+            file_count++;
+        }
+        current = current->value;
+    }
+    // No filenames also indicate stdin!
+    if(file_count == 0) {
+        peek_stdin(numbered, reverse);
+        return;
+    }
+    // Process every filename in the order supplied!
+    current = tokens->next;
+    while(current != NULL) {
+        if(current->type != TOKEN_WORD) {
+            break;
+        }
+        // Skip flags!
+        if(current->value[0] == '-' && strcmp(current->value, "-") != 0) {
+            current = current->next;
+            continue;
+        }
+        // '-' indicates stdin!
+        if(strcmp(current->value. "-") == 0) {
+            peek_stdin(numbered, reverse);
+        }
+        else {
+            peek_file(current->value, numbered, reverse);
+        }
+        current = current->next;
+    }
+}
+
 // Determine whether curr cmd is a built-in or not - ret true if so, else false if it needs to be handled in some other case!
 bool execute_builtin(Token *tokens) {
     if(tokens == NULL || tokens->type != TOKEN_WORD) {
