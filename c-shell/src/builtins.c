@@ -723,6 +723,129 @@ static bool peek_reverse_regular(int fd, bool numbered) {
     return true;
 }
 
+// Revstdin/non - seekable input!
+// Non-seekable input is similar to stdin by nature - you cannot jump to a specific pos in it!
+static bool peek_reverse_stream(int fd, bool numbered) {
+    PeekLine *lines = NULL;
+    size_t line_count = 0;
+    PeekLine current;
+    initialise_peek_line(&current);
+    char buffer[PEEK_BUFFER_SIZE];
+    while(true) {
+        ssize_t bytes_read = read(fd, buffer, sizeof(buffer));
+        if(bytes_read == 0) {
+            break;
+        }
+        if(bytes_read < 0) {
+            if(errno == EINTR) {
+                continue;
+            }
+            free_peek_line(&current);
+            for(size_t i = 0; i < line_count; i++) {
+                free_peek_line(&lines[i]);
+            }
+            free(lines);
+            return false;
+        }
+        for(ssize_t i = 0; i < bytes_read; i++) {
+            if(buffer[i] == '\n') {
+                if(current.length > 0) {
+                    PeekLine *new_lines = realloc(lines, (line_count + 1) * sizeof(PeekLine));
+                    if(new_lines == NULL) {
+                        free_peek_line(&current);
+                        for(size_t j = 0; j < line_count; j++) {
+                            free_peek_line(&lines[j]);
+                        }
+                        free(lines);
+                        return false;
+                    }
+                    lines = new_lines;
+                    lines[line_count] = current;
+                    line_count++;
+                    initialise_peek_line(&current);
+                }
+            }
+            else {
+                if(!append_peek_character(&current, buffer[i])) {
+                    free_peek_line(&current);
+                    for(size_t j = 0; j < line_count; j++) {
+                        free_peek_line(&lines[j]);
+                    }
+                    free(lines);
+                    return false;
+                }
+            }
+        }
+    }
+    // Handling the final line present without a trailing '\n'!
+    if(current.length > 0) {
+        PeekLine *new_lines = realloc(lines, (line_count + 1) * sizeof(PeekLine));
+        if(new_lines == NULL) {
+            free_peek_line(&current);
+            for(size_t i = 0; i < line_count; i++) {
+                free_peek_line(&lines[i]);
+            }
+            free(lines);
+            return false;
+        }
+        lines = new_lines;
+        lines[line_count] = current;
+        line_count++;
+        initialise_peek_line(&current);
+    }
+    // The code block above has saved the lines into a buffer, and then we print them in rev from that buffer!
+    // Printing the lines in rev!
+    for(size_t i = line_count; i > 0; i--) {
+        size_t index = i - 1;
+        if(numbered) {
+            printf("%zu ", index + 1);
+        }
+        fwrite(lines[index].data, 1, lines[index].length, stdout);
+        putchar('\n');
+    }
+    for(size_t i = 0; i < line_count; i++) {
+        free_peek_line(&lines[i]);        
+    }
+    free(lines);
+    return true;
+}
+
+// Common file processor, decides whether it's a reg file, dir or non-seekable input!
+static void peek_file(const char *filename, bool numbered, bool reverse) {
+    int fd = open(filename, O_RDONLY);
+    if(fd == -1) {
+        printf("peek: no such file or directory\n");
+        return;
+    }
+    struct stat information;
+    // fstat() takes the attributes of the file/other i/o resources that the open fd points to, and places them in a buffer!
+    // Common attri include file size, perms and modification times!
+    if(fstat(fd, &information) == -1) {
+        close(fd);
+        printf("peek: no such file or directory\n");
+        return;
+    }
+    bool success;
+    if(!reverse) {
+        if(numbered) {
+            success = peek_forward_numbered(fd);
+        }
+        else {
+            success = peek_forward(fd);
+        }
+    }
+    else if(S_ISREG(information.st_mode)) {
+        success = peek_reverse_regular(fd, numbered);
+    }
+    else {
+        // Pipes, FIFOs etc. are non-seekable, so we save them to buffer and then process them!
+        success = peek_reverse_stream(fd, numbered);
+    }
+    // Prevents unused var warning - we're using the -Werror flag in the Makefile!
+    (void)success;
+    close(fd);
+}
+
 // Determine whether curr cmd is a built-in or not - ret true if so, else false if it needs to be handled in some other case!
 bool execute_builtin(Token *tokens) {
     if(tokens == NULL || tokens->type != TOKEN_WORD) {
