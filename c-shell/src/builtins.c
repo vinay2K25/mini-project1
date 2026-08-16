@@ -260,17 +260,6 @@ static void execute_hop(Token *tokens) {
         current = current->next;
     }
 }
-// Determine whether curr cmd is a built-in or not - ret true if so, else false if it needs to be handled in some other case!
-bool execute_builtin(Token *tokens) {
-    if(tokens == NULL || tokens->type != TOKEN_WORD) {
-        return false;
-    }
-    if(strcmp(tokens->value, "hop") == 0) {
-        execute_hop(tokens);
-        return true;
-    }
-    return false;
-}
 
 // Path resolver for reveal - this will convert a rel file path into an abs file path!
 static bool resolve_reveal_path(const char *argument, char *result, size_t size) {
@@ -323,7 +312,7 @@ static int compare_reveal_entries(const void *first, const void *second) {
     return (strcmp(a->name, b->name));
 }
 
-static RevealEntry read_reveal_entries(const char *directory, bool show_hidden, size_t *count) {
+static RevealEntry *read_reveal_entries(const char *directory, bool show_hidden, size_t *count) {
     DIR *dir = opendir(directory);
     if(dir == NULL) {
         return NULL;
@@ -337,7 +326,7 @@ static RevealEntry read_reveal_entries(const char *directory, bool show_hidden, 
             continue;
         }
         // Hidden files are omitted unless -a flag is detected!
-        if(!show_hidden && entry->d_name[0] == 0) {
+        if(!show_hidden && entry->d_name[0] == '.') {
             continue;
         }
         RevealEntry *new_entries = realloc(entries, (entry_count + 1) * sizeof(RevealEntry));
@@ -424,7 +413,7 @@ static bool parse_reveal_flag(const char *argument, bool *show_hidden, bool *rec
     if(argument[0] != '-' || argument[1] == '\0') {
         return false;
     }
-    for(size_t i = 1; i < argument[i] != 0; i++) {
+    for(size_t i = 1; argument[i] != 0; i++) {
         // Show all files and dir, including hidden ones!
         if(argument[i] == 'a') {
             *show_hidden = true;
@@ -440,3 +429,66 @@ static bool parse_reveal_flag(const char *argument, bool *show_hidden, bool *rec
     return true;
 }
 
+static void execute_reveal(Token *tokens) {
+    bool show_hidden = false;
+    bool recursive = false;
+    char *target = NULL;
+    Token *current = tokens->next;
+    while(current != NULL) {
+        if(current->type != TOKEN_WORD) {
+            return;
+        }
+        // Anything beginning with '-' is considered to be a flag!
+        if(current->value[0] == '-') {
+            if(!parse_reveal_flag(current->value, &show_hidden, &recursive)) {
+                printf("reveal: invalid syntax\n");
+                return;
+            }
+        }
+        else {
+            // Reveal cmd accepts at most one dir arg!
+            if(target != NULL) {
+                printf("reveal: invalid syntax\n");
+                return;
+            }
+            target = current->value;
+        }
+        current = current->next;
+    }
+    // No targ indicates cwd!
+    char resolved_path[PATH_MAX];
+    if(target == NULL) {
+        if(getcwd(resolved_path, sizeof(resolved_path)) == NULL) {
+            printf("reveal: no such directory\n");
+            return;
+        }
+    }
+    else {
+        if(!resolve_reveal_path(target, resolved_path, sizeof(resolved_path))) {
+            printf("reveal: no such directory\n");
+            return;
+        }
+    }
+    // The resolved targ must be an actual dir!
+    if(!reveal_is_directory(resolved_path)) {
+        printf("reveal: no such directory\n");
+        return;
+    }
+    reveal_directory(resolved_path, show_hidden, recursive, NULL);
+}
+
+// Determine whether curr cmd is a built-in or not - ret true if so, else false if it needs to be handled in some other case!
+bool execute_builtin(Token *tokens) {
+    if(tokens == NULL || tokens->type != TOKEN_WORD) {
+        return false;
+    }
+    if(strcmp(tokens->value, "hop") == 0) {
+        execute_hop(tokens);
+        return true;
+    }
+    if(strcmp(tokens->value, "reveal") == 0) {
+        execute_reveal(tokens);
+        return true;
+    }
+    return false;
+}
