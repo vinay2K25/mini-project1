@@ -996,9 +996,10 @@ static void locate_one(const char *filename) {
     // getenv() searches for that key-value pair and ret a pointer to the val!
     const char *path_environment = getenv("PATH");
     if(path_environment != NULL) {
-        char path_copy[PATH_MAX * 4];
-        int written = snprintf(path_copy, sizeof(path_copy), "%s", path_environment);
-        if(written >= 0 && (size_t)written < sizeof(path_copy)) {
+        char *path_copy = malloc(strlen(path_environment) + 1);
+
+        if(path_copy != NULL) {
+            strcpy(path_copy, path_environment);
             char *directory = path_copy;
             while(true) {
                 // Returns a pointer to the first occ of a char in the str!
@@ -1019,10 +1020,22 @@ static void locate_one(const char *filename) {
                 directory = separator + 1;
             }
         }
+        free(path_copy);
     }
     // No executable was found anywhere!
     if(!found) {
         printf("locate: command not found (%s)\n", filename);
+    }
+}
+
+static void execute_locate(Token *tokens) {
+    Token *current = tokens->next;
+    while(current != NULL) {
+        if(current->type != TOKEN_WORD) {
+            return;
+        }
+        locate_one(current->value);
+        current = current->next;
     }
 }
 
@@ -1041,6 +1054,10 @@ bool execute_builtin(Token *tokens) {
     }
     if(strcmp(tokens->value, "peek") == 0) {
         execute_peek(tokens);
+        return true;
+    }
+    if(strcmp(tokens->value, "locate") == 0) {
+        execute_locate(tokens);
         return true;
     }
     return false;
