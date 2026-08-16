@@ -978,7 +978,53 @@ static bool make_absolute_path(const char *directory, const char *filename, char
     // Using the realpath() func would collapse both /usr/bin/gcc and /bin/gcc into a single abs path /usr/bin/gcc, and we don't want this!
 }
 
-
+// Lookup for one cmd!
+static void locate_one(const char *filename) {
+    bool found = false;
+    // We first search the cwd, then other dir!
+    char current_directory[PATH_MAX];
+    if(getcwd(current_directory, sizeof(current_directory)) != NULL) {
+        char candidate[PATH_MAX];
+        int written = snprintf(candidate, sizeof(candidate), "%s/%s", current_directory, filename);
+        if(written >= 0 && (size_t)written < sizeof(candidate) && is_executable_file(candidate)) {
+            printf("%s\n", candidate);
+            found = true;
+        }
+    }
+    // We now search every dir listed in PATH, in the same order as the appear!
+    // Env var are key-val pairs stored by the os containing system wide conf data!
+    // getenv() searches for that key-value pair and ret a pointer to the val!
+    const char *path_environment = getenv("PATH");
+    if(path_environment != NULL) {
+        char path_copy[PATH_MAX * 4];
+        int written = snprintf(path_copy, sizeof(path_copy), "%s", path_environment);
+        if(written >= 0 && (size_t)written < sizeof(path_copy)) {
+            char *directory = path_copy;
+            while(true) {
+                // Returns a pointer to the first occ of a char in the str!
+                char *separator = strchr(directory, ':');
+                if(separator != NULL) {
+                    *separator = '\0';
+                }
+                char candidate[PATH_MAX];
+                if(make_absolute_path(directory, filename, candidate, sizeof(candidate))) {
+                    if(is_executable_file(candidate)) {
+                        printf("%s\n", candidate);
+                        found = true;
+                    }
+                }
+                if(separator == NULL) {
+                    break;
+                }
+                directory = separator + 1;
+            }
+        }
+    }
+    // No executable was found anywhere!
+    if(!found) {
+        printf("locate: command not found (%s)\n", filename);
+    }
+}
 
 // Determine whether curr cmd is a built-in or not - ret true if so, else false if it needs to be handled in some other case!
 bool execute_builtin(Token *tokens) {
