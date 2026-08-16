@@ -321,3 +321,54 @@ static int compare_reveal_entries(const void *first, const void *second) {
     const RevealEntry *b = second;
     return (strcmp(a->name, b->name));
 }
+
+static RevealEntry read_reveal_entries(const char *directory, bool show_hidden, size_t *count) {
+    DIR *dir = opendir(directory);
+    if(dir == NULL) {
+        return NULL;
+    }
+    RevealEntry *entries = NULL;
+    size_t entry_count = 0;
+    struct dirent *entry;
+    while((entry = readdir(dir)) != NULL) {
+        // "." and ".." are never displayed as dir entries!
+        if(strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        // Hidden files are omitted unless -a flag is detected!
+        if(!show_hidden && entry->d_name[0] == 0) {
+            continue;
+        }
+        RevealEntry *new_entries = realloc(entries, (entry_count + 1) * sizeof(RevealEntry));
+        if(new_entries == NULL) {
+            free(entries);
+            closedir(dir);
+            return NULL;
+        }
+        entries = new_entries;
+        entries[entry_count].name = malloc(strlen(entry->d_name) + 1);
+        if(entries[entry_count].name == NULL) {
+            for(size_t i = 0; i < entry_count; i++) {
+                free(entries[i].name);
+            }
+            free(entries);
+            closedir(dir);
+            return NULL;
+        }
+        strcpy(entries[entry_count].name, entry->d_name);
+        char full_path[PATH_MAX];
+        int written = snprintf(full_path, sizeof(full_path), "%s/%s", directory, entry->d_name);
+        if(written < 0 || (size_t)written >= sizeof(full_path)) {
+            entries[entry_count].is_directory = false;
+        }
+        else {
+            entries[entry_count].is_directory = reveal_is_directory(full_path);
+        }
+        entry_count++;
+    }
+    closedir(dir);
+    qsort(entries, entry_count, sizeof(RevealEntry), compare_reveal_entries);
+    *count = entry_count;
+    return entries;
+}
+
