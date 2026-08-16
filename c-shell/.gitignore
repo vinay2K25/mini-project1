@@ -1,2 +1,5 @@
 # Never push the compiled program on-to the repository!
 shell.out
+
+# Bash script to count the number of lines of code written so far!
+count.sh
