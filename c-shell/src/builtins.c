@@ -966,7 +966,7 @@ static bool make_absolute_path(const char *directory, const char *filename, char
     }
     // Already an abs path!
     if(directory[0] == '/') {
-        int written = snprintf(result, size, "%s/%s", current_directory, filename);
+        int written = snprintf(result, size, "%s/%s", directory, filename);
         return written >= 0 && (size_t)written < size;
     }
     // Rel path comp!
