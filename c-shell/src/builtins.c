@@ -6,6 +6,8 @@
 #include <limits.h>
 #include <sys/stat.h>
 #include "builtins.h"
+#include <dirent.h>
+#include <errno.h>
 
 // File to store the frecencies of the directories!
 #define FRECENCY_FILE ".cshell_frecency"
@@ -16,6 +18,11 @@ typedef struct FrecencyEntry {
     long long last_visit;
     struct FrecencyEntry *next;
 } FrecencyEntry;
+
+typedef struct RevealEntry {
+    char *name;
+    bool is_directory;
+} RevealEntry;
 
 static char home_directory[PATH_MAX];
 static char previous_directory[PATH_MAX];
@@ -262,4 +269,55 @@ bool execute_builtin(Token *tokens) {
         return true;
     }
     return false;
+}
+
+// Path resolver for reveal - this will convert a rel file path into an abs file path!
+static bool resolve_reveal_path(const char *argument, char *result, size_t size) {
+    if(strcmp(argument, "~") == 0) {
+        snprintf(result, size, "%s", home_directory);
+        return true;
+    }
+    if(strcmp(argument, ".") == 0) {
+        if(getcwd(result, size) == NULL) {
+            return false;
+        }
+        return true;
+    }
+    if(strcmp(argument, "..") == 0) {
+        char current[PATH_MAX];
+        if(getcwd(current, sizeof(current)) == NULL) {
+            return false;
+        }
+        if(realpath("..", result) == NULL) {
+            return false;
+        }
+        return true;
+    }
+    if(strcmp(argument, "-") == 0) {
+        if(!has_previous_directory) {
+            return false;
+        }
+        snprintf(result, size, "%s", previous_directory);
+        return true;
+    }
+    // For ordinary paths, resolve rel to cwd or accept an abs path!
+    if(realpath(argument, result) == NULL) {
+        return false;
+    }
+    return true;
+}
+
+static bool reveal_is_directory(const char *path) {
+    struct stat information;
+    if(stat(path, &information) == -1) {
+        return false;
+    }
+    return S_ISDIR(information.st_mode);
+}
+
+// Sorting revealed entries!
+static int compare_reveal_entries(const void *first, const void *second) {
+    const RevealEntry *a = first;
+    const RevealEntry *b = second;
+    return (strcmp(a->name, b->name));
 }
