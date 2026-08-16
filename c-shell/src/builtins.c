@@ -8,10 +8,15 @@
 #include "builtins.h"
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/wait.h>
 
 // PATH_MAX
 // File to store the frecencies of the directories!
 #define FRECENCY_FILE ".cshell_frecency"
+
+// Dynamic buff to handle reading file in small chunks, specially during rev!
+#define PPEK_BUFFER_SIZE 4096
 
 typedef struct FrecencyEntry {
     char path[PATH_MAX];
@@ -24,6 +29,12 @@ typedef struct RevealEntry {
     char *name;
     bool is_directory;
 } RevealEntry;
+
+typedef struct PeekLine {
+    char *data;
+    size_t length;
+    size_t capacity;
+} PeekLine;
 
 static char home_directory[PATH_MAX];
 static char previous_directory[PATH_MAX];
@@ -475,6 +486,50 @@ static void execute_reveal(Token *tokens) {
         return;
     }
     reveal_directory(resolved_path, show_hidden, recursive, NULL);
+}
+
+static void initialise_peek_line(PeekLine *line) {
+    line->data = NULL;
+    line->length = 0;
+    line->capacity = 0;
+}
+
+// Append a char to the curr rev line!
+static bool append_peek_character(PeekLine *line, char character) {
+    if(line->length + 1 >= line->capacity) {
+        size_t new_capacity = line->capacity == 0 ? 64 : line->capacity * 2;
+        char *new_data = realloc(line->data, new_capacity);
+        if(new_data == NULL) {
+            return false;
+        }
+        line->data = new_data;
+        line->capacity = new_capacity;
+    }
+    line->data[line->length++] = character;
+    return true;
+}
+
+static void free_peek_line(PeekLine *line) {
+    free(line->data);
+    line->data = NULL;
+    line->length = 0;
+    line->capacity = 0;
+}
+
+// Rev the curr line!
+static void reverse_peek_line(PeekLine *line) {
+    if(line->length == 0) {
+        return;
+    }
+    size_t left = 0;
+    size_t right = line->length - 1;
+    while(left < right) {
+        char temporary = line->data[left];
+        line->data[left] = line->data[right];
+        line->data[right] = temporary;
+        left++;
+        right--;
+    }
 }
 
 // Determine whether curr cmd is a built-in or not - ret true if so, else false if it needs to be handled in some other case!
