@@ -939,6 +939,47 @@ static void execute_peek(Token *tokens) {
     }
 }
 
+// Helper func to determine if file is executable or not!
+static bool is_executable_file(const char *path) {
+    struct stat information;
+    if(stat(path, &information) == -1) {
+        return false;
+    }
+    // Targ file must be an executable!
+    // A symbolic link to an exec reg file is also accepted as well! These refer to special types of files that point to other files!
+    if(!S_ISREG(information.st_mode)) {
+        return false;
+    }
+    return access(path, X_OK) == 0;
+}
+
+// Helper func to convert rel file path to an abs one!
+static bool make_absolute_path(const char *directory, const char *filename, char *result, size_t size) {
+    char current_directory[PATH_MAX];
+    if(directory[0] == '\0') {
+        // An empty path comp indicates the curr dir!
+        if(getcwd(current_directory, sizeof(current_directory)) == NULL) {
+            return false;
+        }
+        int written = snprintf(result, size, "%s/%s", current_directory, filename);
+        return written >= 0 && (size_t)written < size;
+    }
+    // Already an abs path!
+    if(directory[0] == '/') {
+        int written = snprintf(result, size, "%s/%s", current_directory, filename);
+        return written >= 0 && (size_t)written < size;
+    }
+    // Rel path comp!
+    if(getcwd(current_directory, sizeof(current_directory)) == NULL) {
+        return false;
+    }
+    int written = snprintf(result, size, "%s/%s/%s", current_directory, directory, filename);
+    return written >= 0 && (size_t)written < size;
+    // Using the realpath() func would collapse both /usr/bin/gcc and /bin/gcc into a single abs path /usr/bin/gcc, and we don't want this!
+}
+
+
+
 // Determine whether curr cmd is a built-in or not - ret true if so, else false if it needs to be handled in some other case!
 bool execute_builtin(Token *tokens) {
     if(tokens == NULL || tokens->type != TOKEN_WORD) {
