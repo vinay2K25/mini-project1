@@ -417,3 +417,26 @@ static void reveal_directory(const char *directory, bool show_hidden, bool recur
     }
     free_reveal_entries(entries, count);
 }
+
+// Parsing the reveal flags!
+static bool parse_reveal_flag(const char *argument, bool *show_hidden, bool *recursive) {
+    // No flags were detected!
+    if(argument[0] != '-' || argument[1] == '\0') {
+        return false;
+    }
+    for(size_t i = 1; i < argument[i] != 0; i++) {
+        // Show all files and dir, including hidden ones!
+        if(argument[i] == 'a') {
+            *show_hidden = true;
+        }
+        // Recursively show all contents!
+        else if(argument[i] == 't') {
+            *recursive = true;
+        }
+        else {
+            return false;
+        }
+    }
+    return true;
+}
+
