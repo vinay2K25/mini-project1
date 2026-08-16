@@ -98,3 +98,29 @@ static bool resolve_command(const char *command, char *resolved_path, size_t siz
     free(path_copy);
     return false;
 }
+
+// Building the argv array - counting num of arg after the cmd!
+static size_t count_command_arguments(Token *tokens) {
+    size_t count = 0;
+    Token *current = tokens;
+    while(current != NULL && current->type == TOKEN_WORD) {
+        count++;
+        current = current->next;
+    }
+    return count;
+}
+
+static char **build_argv(Token *tokens) {
+    size_t argument_count = count_command_arguments(tokens);
+    char **argv = malloc((argument_count + 1) * sizeof(char *));
+    if(argv == NULL) {
+        return NULL;
+    }
+    Token *current = tokens;
+    for(size_t i = 0; i < argument_count; i++) {
+        argv[i] = current->value;
+        current = current->next;
+    }
+    argv[argument_count] = NULL;
+    return argv;
+}
