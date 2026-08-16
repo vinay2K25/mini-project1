@@ -597,6 +597,56 @@ static bool peek_forward(int fd) {
     }
 }
 
+// Processing lines individually!
+static bool peek_forward_numbered(int fd) {
+    char buffer[PEEK_BUFFER_SIZE];
+    PeekLine line;
+    initialise_peek_line(&line);
+    size_t line_number = 0;
+    while(true) {
+        ssize_t bytes_read = read(fd, buffer, sizeof(buffer));
+        if(bytes_read == 0) {
+            break;
+        }
+        if(bytes_read < 0) {
+            if(errno == EINTR) {
+                continue;
+            }
+            free_peek_line(&line);
+            return false;
+        }
+        for(ssize_t i = 0; i < bytes_read; i++) {
+            char character = buffer[i];
+            if(character == '\n') {
+                // Ignore empty lines completely!
+                if(line.length > 0) {
+                    line_number++;
+                    // %zu is used to print the size_t var!
+                    printf("%zu ", line_number);
+                    fwrite(line.data, 1, line.length, stdout);
+                    putchar('\n');
+                }
+                line.length = 0;
+            }
+            else {
+                if(!append_peek_character(&line, character)) {
+                    free_peek_line(&line);
+                    return false;
+                }
+            }
+        }
+    }
+    // Final line need not contain '\n'!
+    if(line.length > 0) {
+        line_number++;
+        printf("%zu ", line_number);
+        fwrite(line.data, 1, line.length, stdout);
+        putchar('\n');
+    }
+    free_peek_line(&line);
+    return true;
+}
+
 // Determine whether curr cmd is a built-in or not - ret true if so, else false if it needs to be handled in some other case!
 bool execute_builtin(Token *tokens) {
     if(tokens == NULL || tokens->type != TOKEN_WORD) {
