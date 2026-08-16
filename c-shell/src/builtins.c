@@ -16,7 +16,7 @@
 #define FRECENCY_FILE ".cshell_frecency"
 
 // Dynamic buff to handle reading file in small chunks, specially during rev!
-#define PPEK_BUFFER_SIZE 4096
+#define PEEK_BUFFER_SIZE 4096
 
 typedef struct FrecencyEntry {
     char path[PATH_MAX];
@@ -529,6 +529,71 @@ static void reverse_peek_line(PeekLine *line) {
         line->data[right] = temporary;
         left++;
         right--;
+    }
+}
+
+// Func to count the num of non - empty lines in the file!
+static bool count_nonempty_lines(int fd, size_t *count) {
+    char buffer[PEEK_BUFFER_SIZE];
+    size_t nonempty_lines = 0;
+    bool line_has_content = false;
+    while(true) {
+        ssize_t bytes_read = read(fd, buffer, sizeof(buffer));
+        if(bytes_read == 0) {
+            break;
+        }
+        if(bytes_read < 0) {
+            // EINTR indicates interrupted func call - prog is stopped mid-way thru exec by hardware/os call!
+            if(errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        for(ssize_t i = 0; i < bytes_read; i++) {
+            if(buffer[i] == '\n') {
+                if(line_has_content) {
+                    nonempty_lines++;
+                }
+                line_has_content = false;
+            }
+            else {
+                line_has_content = true;
+            }
+        }
+    }
+    // Final line need not end with '\n'!
+    if(line_has_content) {
+        nonempty_lines++;
+    }
+    *count = nonempty_lines;
+    return true;
+} 
+
+// Read thru file in fixed sized chunks and write them to stdout!
+static bool peek_forward(int fd) {
+    char buffer[PEEK_BUFFER_SIZE];
+    while(true) {
+        ssize_t bytes_read = read(fd, buffer, sizeof(buffer));
+        if(bytes_read == 0) {
+            return true;
+        }
+        if(bytes_read < 0) {
+            if(errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        ssize_t total_written = 0;
+        while(total_written < bytes_read) {
+            ssize_t bytes_written = write(STDOUT_FILENO, buffer + total_written, bytes_read - total_written);
+            if(bytes_written < 0) {
+                if(errno == EINTR) {
+                    continue;
+                }
+                return false;
+            }
+            total_written += bytes_written;
+        }
     }
 }
 
