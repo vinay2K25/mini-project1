@@ -825,6 +825,14 @@ static void peek_file(const char *filename, bool numbered, bool reverse) {
         printf("peek: no such file or directory\n");
         return;
     }
+
+    // Checking if the file entered is actually a dir!
+    if(S_ISDIR(information.st_mode)) {
+        close(fd);
+        printf("peek: is a directory\n");
+        return;
+    }
+
     bool success;
     if(!reverse) {
         if(numbered) {
@@ -865,7 +873,7 @@ static bool parse_peek_flag(const char *argument, bool *numbered, bool *reverse)
     if(argument[0] != '-' || argument[1] == '\0') {
         return false;
     }
-    for(size_t i = 1; argument[i] ! '\0'; i++) {
+    for(size_t i = 1; argument[i] != '\0'; i++) {
         if(argument[i] == 'n') {
             *numbered = true;
         }
@@ -902,7 +910,7 @@ static void execute_peek(Token *tokens) {
         else {
             file_count++;
         }
-        current = current->value;
+        current = current->next;
     }
     // No filenames also indicate stdin!
     if(file_count == 0) {
@@ -921,7 +929,7 @@ static void execute_peek(Token *tokens) {
             continue;
         }
         // '-' indicates stdin!
-        if(strcmp(current->value. "-") == 0) {
+        if(strcmp(current->value, "-") == 0) {
             peek_stdin(numbered, reverse);
         }
         else {
@@ -942,6 +950,10 @@ bool execute_builtin(Token *tokens) {
     }
     if(strcmp(tokens->value, "reveal") == 0) {
         execute_reveal(tokens);
+        return true;
+    }
+    if(strcmp(tokens->value, "peek") == 0) {
+        execute_peek(tokens);
         return true;
     }
     return false;
