@@ -80,7 +80,7 @@ static bool resolve_command(const char *command, char *resolved_path, size_t siz
                 free(path_copy);
                 return false;
             }
-            written = snprintf(candidate, sizeof(candidate, )"%s/%s", current_directory, name);
+            written = snprintf(candidate, sizeof(candidate), "%s/%s", current_directory, name);
         }
         else {
             written = snprintf(candidate, sizeof(candidate), "%s/%s", directory, name);
@@ -151,13 +151,13 @@ static bool execute_external(Token *tokens) {
     // Parent waits for the child to complete exec!
     int status;
     if(waitpid(child, &status, 0) == -1) {
-        peror("waitpid");
+        perror("waitpid");
     }
     free(argv);
     return true;
 }
 
-bool execute_command(token *tokens) {
+bool execute_command(Token *tokens) {
     if(tokens == NULL || tokens->type != TOKEN_WORD) {
         return false;
     }
