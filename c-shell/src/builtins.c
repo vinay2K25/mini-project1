@@ -647,6 +647,82 @@ static bool peek_forward_numbered(int fd) {
     return true;
 }
 
+// Rev a regular file using lseek()!
+static bool peek_reverse_regular(int fd, bool numbered) {
+    // Determining how many non-empty lines exist when numbering is requested!
+    size_t total_lines = 0;
+    if(numbered) {
+        // lseek() on err has ret val (off_t)-1!
+        if(lseek(fd, 0, SEEK_SET) == (off_t)-1) {
+            return false;
+        }
+        if(!count_nonempty_lines(fd, &total_lines)) {
+            return false;
+        }
+    }
+    // Moving to the EOF!
+    off_t position = lseek(fd, 0, SEEK_END);
+    if(position == (off_t)-1) {
+        return false;
+    }
+    char buffer[PEEK_BUFFER_SIZE];
+    PeekLine line;
+    initialise_peek_line(&line);
+    size_t printed_lines = 0;
+    while(position > 0) {
+        off_t chunk_size = position < (off_t)sizeof(buffer) ? position : (off_t)sizeof(buffer);
+        position -= chunk_size;
+        if(lseek(fd, position, SEEK_SET) == (off_t)-1) {
+            free_peek_line(&line);
+            return false;
+        }
+        ssize_t bytes_read = read(fd, buffer, (size_t)chunk_size);
+        if(bytes_read < 0) {
+            if(errno == EINTR) {
+                // Retry the same chunk!
+                position += chunk_size;
+                continue;
+            }
+            free_peek_line(&line);
+            return false;
+        }
+        // Scan the chunk backwards!
+        for(ssize_t i = bytes_read - 1; i >= 0; i--) {
+            char character = buffer[i];
+            if(character == '\n') {
+                // This indicates we've reached the beginning of the line!
+                if(line.length > 0) {
+                    reverse_peek_line(&line);
+                    if(numbered) {
+                        printf("%zu ", total_lines - printed_lines);
+                    }
+                    fwrite(line.data, 1, line.length, stdout);
+                    putchar('\n');
+                    printed_lines++;
+                }
+                line.length = 0;
+            }
+            else {
+                if(!append_peek_character(&line, character)) {
+                    free_peek_line(&line);
+                    return false;
+                }
+            }
+        }
+    }
+    // There's a final line at the beginning of the file, it may not be preceded by a '\n'!
+    if(line.length > 0) {
+        reverse_peek_line(&line);
+        if(numbered) {
+            printf("%zu ", total_lines - printed_lines);
+        }
+        fwrite(line.data, 1, line.length, stdout);
+        putchar('\n');
+    }
+    free_peek_line(&line);
+    return true;
+}
+
 // Determine whether curr cmd is a built-in or not - ret true if so, else false if it needs to be handled in some other case!
 bool execute_builtin(Token *tokens) {
     if(tokens == NULL || tokens->type != TOKEN_WORD) {
