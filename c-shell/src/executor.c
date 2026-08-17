@@ -392,18 +392,18 @@ static Token *get_pipeline_stage(Token *tokens, size_t stage_number) {
 }
 
 // Cnt the num of tokens belonging to each stage!
-static size_t count_pipeline_stage_tokens(Token *stage) {
-    size_t count = 0;
-    Token *current = stage;
-    while(current != NULL) {
-        if(current->type == TOKEN_PIPE || current->type == TOKEN_SEMI || current->type == TOKEN_AMP) {
-            break;
-        }
-        count++;
-        current = current->next;
-    }
-    return count;
-}
+// static size_t count_pipeline_stage_tokens(Token *stage) {
+//     size_t count = 0;
+//     Token *current = stage;
+//     while(current != NULL) {
+//         if(current->type == TOKEN_PIPE || current->type == TOKEN_SEMI || current->type == TOKEN_AMP) {
+//             break;
+//         }
+//         count++;
+//         current = current->next;
+//     }
+//     return count;
+// }
 
 // Exec the pipeline of ext cmd!
 static bool execute_pipeline(Token *tokens) {
