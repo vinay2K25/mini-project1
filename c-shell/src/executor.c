@@ -391,6 +391,122 @@ static Token *get_pipeline_stage(Token *tokens, size_t stage_number) {
     return current;
 }
 
+// Cnt the num of tokens belonging to each stage!
+static size_t count_pipeline_stage_tokens(Token *stage) {
+    size_t count = 0;
+    Token *current = stage;
+    while(current != NULL) {
+        if(current->type == TOKEN_PIPE || current->type == TOKEN_SEMI || current->type == TOKEN_AMP) {
+            break;
+        }
+        count++;
+        current = current->next;
+    }
+    return count;
+}
+
+// Exec the pipeline of ext cmd!
+static bool execute_pipeline(Token *tokens) {
+    size_t command_count = count_pipeline_commands(tokens);
+    // Pipeline req atleast two cmd!
+    if(command_count < 2) {
+        return false;
+    }
+    // A pipeline containing N cmd needs N - 1 pipes!
+    int (*pipes)[2] = malloc((command_count - 1) * sizeof(int[2]));
+    if(pipes == NULL) {
+        return false;
+    }
+    // Creat all pipes before forking!
+    for(size_t i = 0; i < command_count - 1; i++) {
+        if(pipe(pipes[i]) == -1) {
+            perror("pipe");
+            for(size_t j = 0; j < i; j++) {
+                close(pipes[j][0]);
+                close(pipes[j][1]);                
+            }
+            free(pipes);
+            return false;
+        }
+    }
+    // Store the child pids, so that the parent can wait for every single child!
+    pid_t *children = malloc(command_count * sizeof(pid_t));
+    if(children == NULL) {
+        for(size_t i = 0; i < command_count - 1; i++) {
+            close(pipes[i][0]);
+            close(pipes[i][1]);
+        }
+        free(pipes);
+        return false;
+    }
+    for(size_t i = 0; i < command_count; i++) {
+        Token *stage = get_pipeline_stage(tokens, i);
+        // Resolve the exec for this particular stage!
+        char resolved_path[PATH_MAX];
+        if(!resolve_command(stage->value, resolved_path, sizeof(resolved_path))) {
+            // This stage is allowed to fail while the rem pipeline continues!
+            printf("cshell: command not found (%s)\n", stage->value[0] == '%' ? stage->value + 1 : stage->value);
+            children[i] = -1;
+            continue;
+        }
+        char **argv = build_argv(stage);
+        if(argv == NULL) {
+            children[i] = -1;
+            continue;
+        }
+        pid_t child = fork();
+        if(child < 0) {
+            perror("fork");
+            free(argv);
+            children[i] = -1;
+            continue;                   
+        }
+        children[i] = child;
+        // Child procc!
+        if(child == 0) {
+            // If this isn't the first cmd, its stdin comes from prev pipe!
+            if(i > 0) {
+                if(dup2(pipes[i - 1][0], STDIN_FILENO) == -1) {
+                    perror("dup2");
+                    _exit(EXIT_FAILURE);
+                }
+            }
+            // If this isn't the last cmd, its stdout normally goes into the next pipe!
+            if(i < command_count - 1) {
+                if(dup2(pipes[i][1], STDOUT_FILENO) == -1) {
+                    perror("dup2");
+                    _exit(EXIT_FAILURE);                    
+                }
+            }
+            // Close every pipe desc for the child - it only needs stdin and stdout!
+            for(size_t j = 0; j < command_count - 1; j++) {
+                close(pipes[j][0]);
+                close(pipes[j][1]);
+            }
+            execv(resolved_path, argv);
+            _exit(EXIT_FAILURE);
+        }
+        free(argv);
+    }
+    // Parent must close every pipe desc it holds!
+    for(size_t i = 0; i < command_count - 1; i++) {
+        close(pipes[i][0]);
+        close(pipes[i][1]);
+    }
+    // Wait for every successfully creat child!
+    for(size_t i = 0; i < command_count; i++) {
+        if(children[i] != -1) {
+            int status;
+            if(waitpid(children[i], &status, 0) == -1) {
+                perror("waitpid");                
+            }
+        }
+    }
+    free(children);
+    free(pipes);
+    return true;
+}
+
 // We now fork() and ask the child to exec the cmd!
 static bool execute_external(Token *tokens) {
     char resolved_path[PATH_MAX];
@@ -565,6 +681,16 @@ static bool execute_external(Token *tokens) {
 bool execute_command(Token *tokens) {
     if(tokens == NULL || tokens->type != TOKEN_WORD) {
         return false;
+    }
+    Token *current = tokens;
+    while(current != NULL) {
+        if(current->type == TOKEN_PIPE) {
+            return execute_pipeline(tokens);
+        }
+        if(current->type == TOKEN_SEMI || current->type == TOKEN_AMP) {
+            break;
+        }
+        current = current->next;
     }
     return execute_external(tokens);
 }
