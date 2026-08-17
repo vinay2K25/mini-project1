@@ -501,7 +501,28 @@ static bool execute_external(Token *tokens) {
         (void)write_success;
     }
     if(output_count > 0) {
-        // In-complete, fill-in the code here!
+        close(output_pipe[1]);
+        char buffer[4096];
+        while(true) {
+            ssize_t bytes_read = read(output_pipe[0], buffer, sizeof(buffer));
+            if(bytes_read == 0) {
+                break;
+            }
+            if(bytes_read < 0) {
+                if(errno == EINTR) {
+                    continue;
+                }
+                break;
+            }
+            if(!write_to_all_outputs(output_fds, output_count, buffer, (size_t)bytes_read)) {
+                break;
+            }
+            close(output_pipe[0]);
+            for(size_t i = 0; i < output_count; i++) {
+                close(output_fds[i]);
+            }
+            free(output_fds);
+        }
     }
     int status;
     if(waitpid(child, &status, 0) == -1) {
