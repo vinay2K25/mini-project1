@@ -223,3 +223,42 @@ static bool open_input_files(Token *tokens, int **input_fds, size_t *input_count
     *input_fds = fds;
     return true;
 }
+
+// Parent will concat all the files!
+static bool write_all(int fd, const char *buffer, size_t count) {
+    size_t written = 0;
+    while(written < count) {
+        ssize_t result = write(fd, buffer + written, count - written);
+        if(result < 0) {
+            if(errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        if(result == 0) {
+            return false;
+        }
+        written += (size_t)result;
+    }
+    return true;
+}
+
+// We'll copy the file into pipe, then change the fd for stdin to one end of the pipe!
+static bool copy_file_to_pipe(int input_fd, int pipe_fd) {
+    char buffer[4096];
+    while(true) {
+        ssize_t bytes_read = read(input_fd, buffer, sizeof(buffer));
+        if(bytes_read == 0) {
+            return true;
+        }
+        if(bytes_read < 0) {
+            if(errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        if(!write_all(pipe_fd, buffer, (size_t)bytes_read)) {
+            return false;
+        }
+    }
+}
