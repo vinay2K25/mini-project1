@@ -287,6 +287,70 @@ static bool copy_file_to_pipe(int input_fd, int pipe_fd) {
 //     return true;
 // }
 
+// Helper func to count the num of output redir!
+static size_t count_output_redirections(Token *tokens) {
+    size_t count = 0;
+    Token *current = tokens;
+    while(current != NULL) {
+        if(current->type == TOKEN_GT || current->type == TOKEN_GTGT) {
+            count++;
+        }
+        // Again, we're only concerned with the first cmd grp!
+        if(current->type == TOKEN_SEMI || current->type == TOKEN_AMP || current->type == TOKEN_PIPE) {
+            break;
+        }
+        current = current->next;
+    }
+    return count;
+}
+
+// Opening all output files for redir!
+static bool open_output_files(Token *tokens, int **output_fds, size_t *output_count) {
+    size_t count = count_output_redirections(tokens);
+    *output_count = count;
+    *output_fds = NULL;
+    if(count == 0) {
+        return true;
+    }
+    int *fds = malloc(count * sizeof(int));
+    if(fds == NULL) {
+        return false;
+    }
+    size_t index = 0;
+    Token *current = tokens;
+    while(current != NULL && index < count) {
+        if(current->type == TOKEN_GT || current->type == TOKEN_GTGT) {
+            Token *filename = current->next;
+            int flags;
+            // > overwrites the cont of the file, while >> simply appends to the file!
+            // Incase the file does not exist, we must creat it!
+            if(current->type == TOKEN_GT) {
+                flags = O_WRONLY | O_CREAT | O_TRUNC;
+            }
+            else {
+                flags = O_WRONLY | O_CREAT | O_APPEND;
+            }
+            int fd = open(filename->value, flags, 0644);
+            if(fd == -1) {
+                for(size_t i = 0; i < index; i++) {
+                    close(fds[i]);
+                }
+                free(fds);
+                printf("cshell: no such file or directory\n");
+                return false;                
+            }
+            fds[index] = fd;
+            index++;
+        }
+        if(current->type == TOKEN_SEMI || current->type == TOKEN_AMP || current->type == TOKEN_PIPE) {
+            break;
+        }
+        current = current->next;
+    }
+    *output_fds = fds;
+    return true;
+}
+
 // We now fork() and ask the child to exec the cmd!
 static bool execute_external(Token *tokens) {
     char resolved_path[PATH_MAX];
