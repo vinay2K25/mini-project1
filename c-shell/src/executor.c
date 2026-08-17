@@ -6,6 +6,8 @@
 #include <limits.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <errno.h>
 #include "executor.h"
 
 // Helper func to check if the file is exec or not!
@@ -103,7 +105,10 @@ static bool resolve_command(const char *command, char *resolved_path, size_t siz
 static size_t count_command_arguments(Token *tokens) {
     size_t count = 0;
     Token *current = tokens;
-    while(current != NULL && current->type == TOKEN_WORD) {
+    while(current != NULL) {
+        if(current->type != TOKEN_WORD) {
+            break;
+        }
         count++;
         current = current->next;
     }
@@ -162,4 +167,59 @@ bool execute_command(Token *tokens) {
         return false;
     }
     return execute_external(tokens);
+}
+
+// Helper func to cnt the num of input redirections!
+static size_t count_input_redirections(Token *tokens) {
+    size_t count = 0;
+    Token *current = tokens;
+    while(current != NULL) {
+        if(current->type == TOKEN_LT) {
+            count++;
+        }
+        // We're concerned with the first cmd grp, hence, we stop before seeing a ;, &, or |!
+        if(current->type == TOKEN_SEMI || current->type == TOKEN_AMP || current->type == TOKEN_PIPE) {
+            break;
+        }
+        current = current->next;
+    }
+    return count;
+}
+
+// Opening the input files for the redirection!
+static bool open_input_files(Token *tokens, int **input_fds, size_t *input_count) {
+    size_t count = count_input_redirections(tokens);
+    *input_count = count;
+    *input_fds = NULL;
+    if(count == 0) {
+        return true;
+    }
+    int *fds = malloc(count * sizeof(int));
+    if(fds == NULL) {
+        return false;
+    }
+    size_t index = 0;
+    Token *current = tokens;
+    while(current != NULL && index < count) {
+        if(current->type == TOKEN_LT) {
+            Token *filename = current->next;
+            int fd = open(filename->value, O_RDONLY);
+            if(fd == -1) {
+                for(size_t i = 0; i < index; i++) {
+                    close(fds[i]);
+                }
+                free(fds);
+                printf("cshell: no such file or directory\n");
+                return false;
+            }
+            fds[index] = fd;
+            index++;
+        }
+        if(current->type == TOKEN_SEMI || current->type == TOKEN_AMP || current->type == TOKEN_PIPE) {
+            break;
+        }
+        current = current->next;
+    }
+    *input_fds = fds;
+    return true;
 }
