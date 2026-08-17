@@ -130,45 +130,6 @@ static char **build_argv(Token *tokens) {
     return argv;
 }
 
-// We now fork() and ask the child to exec the cmd!
-static bool execute_external(Token *tokens) {
-    char resolved_path[PATH_MAX];
-    if(!resolve_command(tokens->value, resolved_path, sizeof(resolved_path))) {
-        printf("cshell: command not found (%s)\n", tokens->value[0] == '%' ? tokens->value + 1 : tokens->value);
-        return false;
-    }
-    char **argv = build_argv(tokens);
-    if(argv == NULL) {
-        return false;
-    }
-    pid_t child = fork();
-    if(child < 0) {
-        perror("fork");
-        free(argv);
-        return false;
-    }
-    if(child == 0) {
-        execv(resolved_path, argv);
-        // We reach here only if execv() failed!
-        perror("exec");
-        _exit(EXIT_FAILURE);
-    }
-    // Parent waits for the child to complete exec!
-    int status;
-    if(waitpid(child, &status, 0) == -1) {
-        perror("waitpid");
-    }
-    free(argv);
-    return true;
-}
-
-bool execute_command(Token *tokens) {
-    if(tokens == NULL || tokens->type != TOKEN_WORD) {
-        return false;
-    }
-    return execute_external(tokens);
-}
-
 // Helper func to cnt the num of input redirections!
 static size_t count_input_redirections(Token *tokens) {
     size_t count = 0;
@@ -312,4 +273,112 @@ static bool redirect_input(int *input_fds, size_t input_count) {
     // The writer terminates alone once all input has been copied!
     waitpid(writer, NULL, 0);
     return true;
+}
+
+// Creating the input pipe!
+static bool create_input_pipe(int *input_fds, size_t input_count, int input_pipe[2]) {
+    if(pipe(input_pipe) == -1) {
+        perror("pipe");
+        return false;
+    }
+    // Again, since we've used -Werror flag, we'll get the unused var warning - this avoids them!
+    (void)input_fds;
+    (void)input_count;
+    return true;
+}
+
+// We now fork() and ask the child to exec the cmd!
+static bool execute_external(Token *tokens) {
+    char resolved_path[PATH_MAX];
+    if(!resolve_command(tokens->value, resolved_path, sizeof(resolved_path))) {
+        printf("cshell: command not found (%s)\n", tokens->value[0] == '%' ? tokens->value + 1 : tokens->value);
+        return false;
+    }
+    char **argv = build_argv(tokens);
+    if(argv == NULL) {
+        return false;
+    }
+
+    int *input_fds = NULL;
+    size_t input_count = 0;
+    if(!open_input_files(tokens, &input_fds, &input_count)) {
+        free(argv);
+        return false;
+    }
+    int input_pipe[2] = {-1, 1};
+    if(input_count > 0) {
+        if(pipe(input_pipe) == -1) {
+            perror("pipe");
+            for(size_t i = 0; i < input_count; i++) {
+                close(input_fds[i]);
+            }
+            free(input_fds);
+            free(argv);
+            return false;
+        }
+    }
+
+    pid_t child = fork();
+    if(child < 0) {
+        perror("fork");
+        if(input_count > 0) {
+            close(input_pipe[0]);
+            close(input_pipe[1]);
+            for(size_t i = 0; i < input_count; i++) {
+                close(input_fds[i]);
+            }
+        }
+        free(input_fds);
+        free(argv);
+        return false;
+    }
+    if(child == 0) {
+        if(input_count > 0) {
+            close(input_pipe[1]);
+            if(dup2(input_pipe[0], STDIN_FILENO) == -1) {
+                perror("dup2");
+                _exit(EXIT_FAILURE);
+            }
+            close(input_pipe[0]);
+            // The child no longer needs the file desc!
+            for(size_t i = 0; i < input_count; i++) {
+                close(input_fds[i]);
+            }
+        }        
+        execv(resolved_path, argv);
+        // We reach here only if execv() failed!
+        // perror("exec");
+        _exit(EXIT_FAILURE);
+    }
+    // Parent waits for the child to complete exec!
+    if(input_count > 0) {
+        close(input_pipe[0]);
+        bool write_success = true;
+        for(size_t i = 0; i < input_count; i++) {
+            if(!copy_file_to_pipe(input_fds[i], input_pipe[1])) {
+                write_success = false;
+                break;
+            }
+        }
+        close(input_pipe[1]);
+        for(size_t i = 0; i < input_count; i++) {
+            close(input_fds[i]);
+        }
+        free(input_fds);
+        // Again, to prevent unused var warn!
+        (void)write_success;
+    }
+    int status;
+    if(waitpid(child, &status, 0) == -1) {
+        perror("waitpid");
+    }
+    free(argv);
+    return true;
+}
+
+bool execute_command(Token *tokens) {
+    if(tokens == NULL || tokens->type != TOKEN_WORD) {
+        return false;
+    }
+    return execute_external(tokens);
 }
