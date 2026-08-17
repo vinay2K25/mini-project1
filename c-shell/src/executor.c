@@ -351,6 +351,16 @@ static bool open_output_files(Token *tokens, int **output_fds, size_t *output_co
     return true;
 }
 
+// Writing the same data to every output redir targ!
+static bool write_to_all_outputs(int *output_fds, size_t output_count, const char *buffer, size_t count) {
+    for(size_t i = 0; i < output_count; i++) {
+        if(!write_all(output_fds[i], buffer, count)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // We now fork() and ask the child to exec the cmd!
 static bool execute_external(Token *tokens) {
     char resolved_path[PATH_MAX];
@@ -363,12 +373,24 @@ static bool execute_external(Token *tokens) {
         return false;
     }
 
+    // Input redir!
     int *input_fds = NULL;
     size_t input_count = 0;
     if(!open_input_files(tokens, &input_fds, &input_count)) {
         free(argv);
         return false;
     }
+
+    // Output redir!
+    int *output_fds = NULL;
+    size_t output_count = 0;
+    if(!open_output_files(tokens, &output_fds, &output_count)) {
+        free(input_fds);
+        free(argv);
+        return false;
+    }
+
+    // Input pipe!
     int input_pipe[2] = {-1, -1};
     if(input_count > 0) {
         if(pipe(input_pipe) == -1) {
@@ -377,6 +399,29 @@ static bool execute_external(Token *tokens) {
                 close(input_fds[i]);
             }
             free(input_fds);
+            free(output_fds);
+            free(argv);
+            return false;
+        }
+    }
+
+    // Output pipe!
+    int output_pipe[2] = {-1, -1};
+    if(output_count > 0) {
+        if(pipe(output_pipe) == -1) {
+            perror("pipe");
+            if(input_count > 0) {
+                close(input_pipe[0]);
+                close(input_pipe[1]);
+            }
+            for(size_t i = 0; i < input_count; i++) {
+                close(input_fds[i]);
+            }
+            for(size_t i = 0; i < output_count; i++) {
+                close(output_fds[i]);
+            }
+            free(input_fds);
+            free(output_fds);
             free(argv);
             return false;
         }
@@ -388,30 +433,53 @@ static bool execute_external(Token *tokens) {
         if(input_count > 0) {
             close(input_pipe[0]);
             close(input_pipe[1]);
-            for(size_t i = 0; i < input_count; i++) {
-                close(input_fds[i]);
-            }
+        }
+        if(output_count > 0) {
+            close(output_pipe[0]);
+            close(output_pipe[1]);
+        }
+        for(size_t i = 0; i < input_count; i++) {
+            close(input_fds[i]);
+        }
+        for(size_t i = 0; i < output_count; i++) {
+            close(output_fds[i]);
         }
         free(input_fds);
+        free(output_fds);
         free(argv);
         return false;
     }
     if(child == 0) {
+        // Redir stdin!
         if(input_count > 0) {
             close(input_pipe[1]);
             if(dup2(input_pipe[0], STDIN_FILENO) == -1) {
                 perror("dup2");
                 _exit(EXIT_FAILURE);
             }
-            close(input_pipe[0]);
-            // The child no longer needs the file desc!
-            for(size_t i = 0; i < input_count; i++) {
-                close(input_fds[i]);
-            }
+            close(input_pipe[0]);            
         }        
+
+        // Redir stdout!
+        if(output_count > 0) {
+            close(output_pipe[0]);
+            if(dup2(output_pipe[1], STDOUT_FILENO) == -1) {
+                perror("dup2");
+                _exit(EXIT_FAILURE);
+            }
+            close(output_pipe[1]);
+        }
+
+        // The child no longer requires the file desc!
+        for(size_t i = 0; i < input_count; i++) {
+            close(input_fds[i]);
+        }
+        for(size_t i = 0; i < output_count; i++) {
+            close(output_fds[i]);
+        }
         execv(resolved_path, argv);
         // We reach here only if execv() failed!
-        // perror("exec");
+        perror("exec");
         _exit(EXIT_FAILURE);
     }
     // Parent waits for the child to complete exec!
@@ -431,6 +499,9 @@ static bool execute_external(Token *tokens) {
         free(input_fds);
         // Again, to prevent unused var warn!
         (void)write_success;
+    }
+    if(output_count > 0) {
+        // In-complete, fill-in the code here!
     }
     int status;
     if(waitpid(child, &status, 0) == -1) {
