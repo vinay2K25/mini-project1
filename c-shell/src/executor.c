@@ -361,6 +361,36 @@ static bool write_to_all_outputs(int *output_fds, size_t output_count, const cha
     return true;
 }
 
+// Func to cnt num of pipe cmd!
+static size_t count_pipeline_commands(Token *tokens) {
+    size_t count = 1;
+    Token *current = tokens;
+    while(current != NULL) {
+        if(current->type == TOKEN_PIPE) {
+            count++;
+        }
+        // Again, we're only concerned with the first cmd grp!
+        if(current->type == TOKEN_SEMI || current->type == TOKEN_AMP) {
+            break;
+        }
+        current = current->next;
+    }
+    return count;
+}
+
+// This func ret the token at the start of the pipeline stage!
+static Token *get_pipeline_stage(Token *tokens, size_t stage_number) {
+    Token *current = tokens;
+    size_t current_stage = 0;
+    while(current != NULL && current_stage < stage_number) {
+        if(current->type == TOKEN_PIPE) {
+            current_stage++;
+        }
+        current = current->next;
+    }
+    return current;
+}
+
 // We now fork() and ask the child to exec the cmd!
 static bool execute_external(Token *tokens) {
     char resolved_path[PATH_MAX];
