@@ -439,6 +439,11 @@ static bool execute_pipeline(Token *tokens) {
         free(pipes);
         return false;
     }
+
+    for(size_t i = 0; i < command_count; i++) {
+        children[i] = -1;
+    }
+
     for(size_t i = 0; i < command_count; i++) {
         Token *stage = get_pipeline_stage(tokens, i);
         // Resolve the exec for this particular stage!
@@ -446,46 +451,135 @@ static bool execute_pipeline(Token *tokens) {
         if(!resolve_command(stage->value, resolved_path, sizeof(resolved_path))) {
             // This stage is allowed to fail while the rem pipeline continues!
             printf("cshell: command not found (%s)\n", stage->value[0] == '%' ? stage->value + 1 : stage->value);
-            children[i] = -1;
+            // children[i] = -1;
             continue;
         }
         char **argv = build_argv(stage);
         if(argv == NULL) {
-            children[i] = -1;
+            // children[i] = -1;
             continue;
         }
+
+        int *input_fds = NULL;
+        size_t input_count = 0;
+        if(!open_input_files(stage, &input_fds, &input_count)) {
+            free(argv);
+            continue;
+        }
+        int *output_fds = NULL;
+        size_t output_count = 0;
+        if(!open_output_files(stage, &output_fds, &output_count)) {
+            free(input_fds);
+            free(argv);
+            continue;
+        }
+
         pid_t child = fork();
         if(child < 0) {
             perror("fork");
+            for(size_t j = 0; j < input_count; j++) {
+                close(input_fds[j]);
+            }
+            for(size_t j = 0; j < output_count; j++) {
+                close(output_fds[j]);
+            }
+            free(input_fds);
+            free(output_fds);
             free(argv);
-            children[i] = -1;
+            // children[i] = -1;
             continue;                   
         }
         children[i] = child;
         // Child procc!
         if(child == 0) {
-            // If this isn't the first cmd, its stdin comes from prev pipe!
-            if(i > 0) {
-                if(dup2(pipes[i - 1][0], STDIN_FILENO) == -1) {
+            // Explicit input redir has more precedence than pipline input!
+            if(input_count == 1) {
+                if(dup2(input_fds[0], STDIN_FILENO) == -1) {
                     perror("dup2");
                     _exit(EXIT_FAILURE);
                 }
             }
-            // If this isn't the last cmd, its stdout normally goes into the next pipe!
+
+            // If this isn't the first cmd, its stdin comes from prev pipe!
+            if(input_count == 0 && i > 0) {
+                if(dup2(pipes[i - 1][0], STDIN_FILENO) == -1) {
+                    perror("dup2");
+                    _exit(EXIT_FAILURE);
+                }
+            }            
+            else if(input_count > 1) {
+                int input_pipe[2];
+                if(pipe(input_pipe) == -1) {
+                    perror("pipe");
+                    _exit(EXIT_FAILURE);
+                }
+                pid_t writer = fork();
+                if(writer == -1) {
+                    perror("fork");
+                    _exit(EXIT_FAILURE);
+                }
+                if(writer == 0) {
+                    close(input_pipe[0]);
+                    for(size_t j = 0; j < input_count; j++) {
+                        if(!copy_file_to_pipe(input_fds[j], input_pipe[1])) {
+                            close(input_pipe[1]);
+                            _exit(EXIT_FAILURE);
+                        }
+                    }
+                    close(input_pipe[1]);
+                    _exit(EXIT_SUCCESS);
+                }
+                close(input_pipe[1]);
+                if(dup2(input_pipe[0], STDIN_FILENO) == -1) {
+                    perror("dup2");
+                    _exit(EXIT_FAILURE);
+                }
+                close(input_pipe[0]);
+            }
+
+            // Explicit output redir has more precendence than pipeline output!
+            if(output_count > 0) {
+                if(dup2(output_fds[0], STDOUT_FILENO) == -1) {
+                    perror("dup2");
+                    _exit(EXIT_FAILURE);
+                }
+            }            
             if(i < command_count - 1) {
                 if(dup2(pipes[i][1], STDOUT_FILENO) == -1) {
                     perror("dup2");
                     _exit(EXIT_FAILURE);                    
                 }
             }
-            // Close every pipe desc for the child - it only needs stdin and stdout!
+
+            // Close every pipe desc!
             for(size_t j = 0; j < command_count - 1; j++) {
                 close(pipes[j][0]);
                 close(pipes[j][1]);
             }
+
+            // Close redir desc!
+            for(size_t j = 0; j < input_count; j++) {
+                close(input_fds[j]);
+            }
+            for(size_t j = 0; j < output_count; j++) {
+                close(output_fds[j]);
+            }
+            free(input_fds);
+            free(output_fds);
+
             execv(resolved_path, argv);
             _exit(EXIT_FAILURE);
         }
+        // Par also closes this stage's file desc!
+        for(size_t j = 0; j < input_count; j++) {
+            close(input_fds[j]);
+        }
+        for(size_t j = 0; j < output_count; j++) {
+            close(output_fds[j]);
+        }
+        free(input_fds);
+        free(output_fds);
+
         free(argv);
     }
     // Parent must close every pipe desc it holds!
