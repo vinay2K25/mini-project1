@@ -547,11 +547,24 @@ static bool execute_pipeline(Token *tokens) {
             }
 
             // Explicit output redir has more precendence than pipeline output!
+            // if(output_count == 1) {
+            //     if(dup2(output_fds[0], STDOUT_FILENO) == -1) {
+            //         perror("dup2");
+            //         _exit(EXIT_FAILURE);
+            //     }
+            // }
             if(output_count > 0) {
+                // int output_pipe[2];
+                // if(pipe(output_pipe) == -1) {
+                //     perror("pipe");
+                //     _exit(EXIT_FAILURE);
+                // }
                 if(dup2(output_fds[0], STDOUT_FILENO) == -1) {
                     perror("dup2");
                     _exit(EXIT_FAILURE);
                 }
+                // close(output_pipe[0]);
+                // close(output_pipe[1]);
             }            
             else if(i < command_count - 1) {
                 if(dup2(pipes[i][1], STDOUT_FILENO) == -1) {
