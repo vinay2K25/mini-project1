@@ -34,7 +34,7 @@ static bool resolve_command(const char *command, char *resolved_path, size_t siz
         name = command + 1;
     }
     // An empty cmd after '%' is not exec!
-    if(name[0] == '%') {
+    if(name[0] == '\0') {
         return false;
     }
     // If the cmd contains '/', it is an abs path!
@@ -336,7 +336,7 @@ static bool open_output_files(Token *tokens, int **output_fds, size_t *output_co
                     close(fds[i]);
                 }
                 free(fds);
-                printf("cshell: no such file or directory\n");
+                printf("cshell: unable to create the file for writing\n");
                 return false;                
             }
             fds[index] = fd;
@@ -469,6 +469,11 @@ static bool execute_pipeline(Token *tokens) {
         int *output_fds = NULL;
         size_t output_count = 0;
         if(!open_output_files(stage, &output_fds, &output_count)) {
+            // Closing all open file desc if this func call fails!
+            for(size_t i = 0; i < input_count; i++) {
+                close(input_fds[i]);
+            }
+
             free(input_fds);
             free(argv);
             continue;
@@ -501,7 +506,7 @@ static bool execute_pipeline(Token *tokens) {
             }
 
             // If this isn't the first cmd, its stdin comes from prev pipe!
-            if(input_count == 0 && i > 0) {
+            else if(input_count == 0 && i > 0) {
                 if(dup2(pipes[i - 1][0], STDIN_FILENO) == -1) {
                     perror("dup2");
                     _exit(EXIT_FAILURE);
@@ -519,6 +524,10 @@ static bool execute_pipeline(Token *tokens) {
                     _exit(EXIT_FAILURE);
                 }
                 if(writer == 0) {
+                    for(size_t j = 0; j < command_count; j++) {
+                        close(pipes[j][0]);
+                        close(pipes[j][1]);
+                    }
                     close(input_pipe[0]);
                     for(size_t j = 0; j < input_count; j++) {
                         if(!copy_file_to_pipe(input_fds[j], input_pipe[1])) {
@@ -544,7 +553,7 @@ static bool execute_pipeline(Token *tokens) {
                     _exit(EXIT_FAILURE);
                 }
             }            
-            if(i < command_count - 1) {
+            else if(i < command_count - 1) {
                 if(dup2(pipes[i][1], STDOUT_FILENO) == -1) {
                     perror("dup2");
                     _exit(EXIT_FAILURE);                    
@@ -757,12 +766,12 @@ static bool execute_external(Token *tokens) {
             if(!write_to_all_outputs(output_fds, output_count, buffer, (size_t)bytes_read)) {
                 break;
             }
-            close(output_pipe[0]);
-            for(size_t i = 0; i < output_count; i++) {
-                close(output_fds[i]);
-            }
-            free(output_fds);
         }
+        close(output_pipe[0]);
+        for(size_t i = 0; i < output_count; i++) {
+            close(output_fds[i]);
+        }
+        free(output_fds);
     }
     int status;
     if(waitpid(child, &status, 0) == -1) {
