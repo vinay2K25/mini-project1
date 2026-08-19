@@ -15,9 +15,9 @@ static Token *find_command_end(Token *start) {
     return current;
 }
 
-static void execute_one_command(Token *start, Token *end) {
+static bool execute_one_command(Token *start, Token *end) {
     if(start == NULL) {
-        return;
+        return true;
     }
     // We temporarily terminate the following command groups!
     // As an example, consider echo Hello! ; echo World!
@@ -27,12 +27,18 @@ static void execute_one_command(Token *start, Token *end) {
         saved_next = end->next;
         end->next = NULL;
     }
-    if(!execute_builtin(start)) {
-        execute_command(start);
+    // this variable helps us decide if we need to execute the commands following the current command!
+    bool success;
+    if(execute_builtin(start)) {
+        success = true;
+    }
+    else {
+        success = execute_command(start);
     }
     if(end != NULL) {
         end->next = saved_next;
-    }
+    }    
+    return success;
 }
 
 bool execute_sequential(Token *tokens) {
@@ -40,7 +46,9 @@ bool execute_sequential(Token *tokens) {
     while(current != NULL) {
         Token *end = find_command_end(current);
         // Execute everything before ';' or '&'!
-        execute_one_command(current, end);
+        if(!execute_one_command(current, end)) {
+            return false;
+        }
         // If no other separator is detected, it marks the end of execution!
         if(end == NULL) {
             break;

@@ -10,6 +10,7 @@
 #include "parser.h"
 #include "builtins.h"
 #include "executor.h"
+#include "sequential.h"
 int main()
 {
     initialise_shell();
@@ -38,7 +39,7 @@ int main()
         // print_tokens(tokens);
 
         if(!execute_builtin(tokens)) {
-            execute_command(tokens);
+            execute_sequential(tokens);
         }
         free_tokens(tokens);
     }
