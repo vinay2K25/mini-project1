@@ -3,3 +3,6 @@ shell.out
 
 # Bash script to count the number of lines of code written so far!
 count.sh
+
+# Test files!
+*.txt
