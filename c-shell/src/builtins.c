@@ -262,6 +262,9 @@ static void execute_hop(Token *tokens) {
         return;
     }
     while(current != NULL) {
+        if(current->type == TOKEN_PIPE || current->type == TOKEN_SEMI || current->type == TOKEN_AMP) {
+            break;
+        }
         // Every token following hop must be TOKEN_WORD!
         // Only process TOKEN_WORD belong-ing to the cmd!
         if(current->type != TOKEN_WORD) {
@@ -446,6 +449,9 @@ static void execute_reveal(Token *tokens) {
     char *target = NULL;
     Token *current = tokens->next;
     while(current != NULL) {
+        if(current->type == TOKEN_PIPE || current->type == TOKEN_SEMI || current->type == TOKEN_AMP) {
+            break;
+        }
         if(current->type != TOKEN_WORD) {
             return;
         }
@@ -893,6 +899,9 @@ static void execute_peek(Token *tokens) {
     size_t file_count = 0;
     Token *current = tokens->next;
     while(current != NULL) {
+        if(current->type == TOKEN_PIPE || current->type == TOKEN_SEMI || current->type == TOKEN_AMP) {
+            break;
+        }
         if(current->type != TOKEN_WORD) {
             return;
         }
@@ -920,6 +929,9 @@ static void execute_peek(Token *tokens) {
     // Process every filename in the order supplied!
     current = tokens->next;
     while(current != NULL) {
+        if(current->type == TOKEN_PIPE || current->type == TOKEN_SEMI || current->type == TOKEN_AMP) {
+            break;
+        }
         if(current->type != TOKEN_WORD) {
             break;
         }
@@ -1031,6 +1043,9 @@ static void locate_one(const char *filename) {
 static void execute_locate(Token *tokens) {
     Token *current = tokens->next;
     while(current != NULL) {
+        if(current->type == TOKEN_PIPE || current->type == TOKEN_SEMI || current->type == TOKEN_AMP) {
+            break;
+        }
         if(current->type != TOKEN_WORD) {
             return;
         }
