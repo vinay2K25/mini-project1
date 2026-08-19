@@ -1039,6 +1039,26 @@ static void execute_locate(Token *tokens) {
     }
 }
 
+// Func to check if the cmd is a built-in cmd or not!
+bool is_builtin_command(Token *tokens) {
+    if(tokens == NULL || tokens->type != TOKEN_WORD) {        
+        return false;
+    }
+    if(strcmp(tokens->value, "hop") == 0) {
+        return true;
+    }
+    if(strcmp(tokens->value, "reveal") == 0) {
+        return true;
+    }
+    if(strcmp(tokens->value, "peek") == 0) {
+        return true;
+    }
+    if(strcmp(tokens->value, "locate") == 0) {
+        return true;
+    }
+    return false;    
+}
+
 // Determine whether curr cmd is a built-in or not - ret true if so, else false if it needs to be handled in some other case!
 bool execute_builtin(Token *tokens) {
     if(tokens == NULL || tokens->type != TOKEN_WORD) {

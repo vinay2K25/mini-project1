@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include "executor.h"
+#include "builtins.h"
 
 // Helper func to check if the file is exec or not!
 static bool is_executable(const char *path) {
@@ -414,9 +415,20 @@ static bool execute_pipeline(Token *tokens) {
     }
     // A pipeline containing N cmd needs N - 1 pipes!
     int (*pipes)[2] = malloc((command_count - 1) * sizeof(int[2]));
-    if(pipes == NULL) {
+
+    // This is to handle multi output redir!
+    int (*output_pipes)[2] = malloc(command_count * sizeof(int[2]));
+    // Malloc failed!
+    if(pipes == NULL || output_pipes == NULL) {
+        free(pipes);
+        free(output_pipes);
         return false;
     }
+    for(size_t i = 0; i < command_count; i++) {
+        output_pipes[i][0] = -1;
+        output_pipes[i][1] = -1;
+    }
+    
     // Creat all pipes before forking!
     for(size_t i = 0; i < command_count - 1; i++) {
         if(pipe(pipes[i]) == -1) {
@@ -440,20 +452,38 @@ static bool execute_pipeline(Token *tokens) {
         return false;
     }
 
+    pid_t *output_writers = malloc(command_count * sizeof(pid_t));
+    if(output_writers == NULL) {
+        for(size_t i = 0; i < command_count - 1; i++) {
+            close(pipes[i][0]);
+            close(pipes[i][1]);
+        }
+        free(children);
+        free(pipes);
+        return false;
+    }
+
     for(size_t i = 0; i < command_count; i++) {
         children[i] = -1;
+        output_writers[i] = -1;
     }
 
     for(size_t i = 0; i < command_count; i++) {
         Token *stage = get_pipeline_stage(tokens, i);
-        // Resolve the exec for this particular stage!
+        
+        // Need to implement the func to check is it's a built-in cmd!
+        bool is_builtin = is_builtin_command(stage);
         char resolved_path[PATH_MAX];
-        if(!resolve_command(stage->value, resolved_path, sizeof(resolved_path))) {
-            // This stage is allowed to fail while the rem pipeline continues!
-            printf("cshell: command not found (%s)\n", stage->value[0] == '%' ? stage->value + 1 : stage->value);
-            // children[i] = -1;
-            continue;
+        if(!is_builtin) {            
+            // Resolve the exec for this particular stage!
+            if(!resolve_command(stage->value, resolved_path, sizeof(resolved_path))) {
+                // This stage is allowed to fail while the rem pipeline continues!
+                printf("cshell: command not found (%s)\n", stage->value[0] == '%' ? stage->value + 1 : stage->value);
+                // children[i] = -1;
+                continue;
+            }
         }
+
         char **argv = build_argv(stage);
         if(argv == NULL) {
             // children[i] = -1;
@@ -477,6 +507,23 @@ static bool execute_pipeline(Token *tokens) {
             free(input_fds);
             free(argv);
             continue;
+        }
+
+        // Multi-output redir!
+        if(output_count > 1) {
+            if(pipe(output_pipes[i]) == -1) {
+                perror("pipe");
+                for(size_t j = 0; j < input_count; j++) {
+                    close(input_fds[j]);
+                }
+                for(size_t j = 0; j < output_count; j++) {
+                    close(output_fds[j]);
+                }
+                free(input_fds);
+                free(output_fds);
+                free(argv);
+                continue;
+            }
         }
 
         pid_t child = fork();
@@ -524,7 +571,7 @@ static bool execute_pipeline(Token *tokens) {
                     _exit(EXIT_FAILURE);
                 }
                 if(writer == 0) {
-                    for(size_t j = 0; j < command_count; j++) {
+                    for(size_t j = 0; j < command_count - 1; j++) {
                         close(pipes[j][0]);
                         close(pipes[j][1]);
                     }
@@ -546,26 +593,19 @@ static bool execute_pipeline(Token *tokens) {
                 close(input_pipe[0]);
             }
 
-            // Explicit output redir has more precendence than pipeline output!
-            // if(output_count == 1) {
-            //     if(dup2(output_fds[0], STDOUT_FILENO) == -1) {
-            //         perror("dup2");
-            //         _exit(EXIT_FAILURE);
-            //     }
-            // }
-            if(output_count > 0) {
-                // int output_pipe[2];
-                // if(pipe(output_pipe) == -1) {
-                //     perror("pipe");
-                //     _exit(EXIT_FAILURE);
-                // }
+            // Handling multi output redir!
+            if(output_count == 1) {
                 if(dup2(output_fds[0], STDOUT_FILENO) == -1) {
                     perror("dup2");
                     _exit(EXIT_FAILURE);
                 }
-                // close(output_pipe[0]);
-                // close(output_pipe[1]);
-            }            
+            }
+            else if(output_count > 1) {
+                if(dup2(output_pipes[i][1], STDOUT_FILENO) == -1) {
+                    perror("dup2");
+                    _exit(EXIT_FAILURE);
+                }
+            }
             else if(i < command_count - 1) {
                 if(dup2(pipes[i][1], STDOUT_FILENO) == -1) {
                     perror("dup2");
@@ -579,6 +619,15 @@ static bool execute_pipeline(Token *tokens) {
                 close(pipes[j][1]);
             }
 
+            for(size_t j = 0; j < command_count; j++) {
+                if(output_pipes[j][0] != -1) {
+                    close(output_pipes[j][0]);
+                }
+                if(output_pipes[j][1] != -1) {
+                    close(output_pipes[j][1]);
+                }
+            }
+
             // Close redir desc!
             for(size_t j = 0; j < input_count; j++) {
                 close(input_fds[j]);
@@ -589,20 +638,72 @@ static bool execute_pipeline(Token *tokens) {
             free(input_fds);
             free(output_fds);
 
+            // Handle the built-in cmd separately!
+            if(is_builtin) {
+                execute_builtin(stage);
+                _exit(EXIT_SUCCESS);
+            }
+
             execv(resolved_path, argv);
             _exit(EXIT_FAILURE);
         }
-        // Par also closes this stage's file desc!
-        for(size_t j = 0; j < input_count; j++) {
-            close(input_fds[j]);
-        }
-        for(size_t j = 0; j < output_count; j++) {
-            close(output_fds[j]);
-        }
-        free(input_fds);
-        free(output_fds);
 
-        free(argv);
+        pid_t output_writer = -1;
+        if(output_count > 1) {
+            output_writer = fork();
+            if(output_writer == -1) {
+                perror("fork");
+            }
+            else if(output_writer == 0) {
+                close(output_pipes[i][1]);
+                // Closing all norm pipeline desc!
+                for(size_t j = 0; j < command_count - 1; j++) {
+                    close(pipes[j][0]);
+                    close(pipes[j][1]);
+                }
+                // Closing every othr output pipe!
+                for(size_t j = 0; j < command_count; j++) {
+                    if(j != i && output_pipes[j][0] != -1) {
+                        close(output_pipes[j][0]);
+                    }
+                    if(j != i && output_pipes[j][1] != -1) {
+                        close(output_pipes[j][1]);
+                    }
+                }
+                // Copy the cmd output to every file!
+                char buffer[4096];
+                while(true) {
+                    ssize_t bytes_read = read(output_pipes[i][0], buffer, sizeof(buffer));
+                    if(bytes_read == 0) {
+                        break;
+                    }
+                    if(bytes_read < 0) {
+                        if(errno == EINTR) {
+                            continue;
+                        }
+                        _exit(EXIT_FAILURE);
+                    }
+                    if(!write_to_all_outputs(output_fds, output_count, buffer, (size_t)bytes_read)) {
+                        _exit(EXIT_FAILURE);
+                    }
+                }
+                close(output_pipes[i][0]);
+                for(size_t j = 0; j < output_count; j++) {
+                    close(output_fds[j]);
+                }
+                _exit(EXIT_SUCCESS);
+            }
+
+            else {
+                output_writers[i] = output_writer;
+                close(output_pipes[i][0]);
+                close(output_pipes[i][1]);
+            }
+            for(size_t j = 0; j < output_count; j++) {
+                close(output_fds[j]);
+            }
+            free(output_fds);
+        }
     }
     // Parent must close every pipe desc it holds!
     for(size_t i = 0; i < command_count - 1; i++) {
@@ -617,8 +718,16 @@ static bool execute_pipeline(Token *tokens) {
                 perror("waitpid");                
             }
         }
+        if(output_writers[i] != -1) {
+            int status;
+            if(waitpid(output_writers[i], &status, 0) == -1) {
+                perror("waitpid");
+            }
+        }
     }
+    free(output_writers);
     free(children);
+    free(output_pipes);
     free(pipes);
     return true;
 }
