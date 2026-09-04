@@ -15,6 +15,7 @@ int main()
 {
     initialise_shell();
     initialise_builtins();
+    initialise_executor();
     char input[4096];
     while(true) {
         print_prompt();

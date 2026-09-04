@@ -6,10 +6,39 @@
 #include <limits.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
+#include <signal.h>
 #include <fcntl.h>
 #include <errno.h>
 #include "executor.h"
 #include "builtins.h"
+
+#define MAX_BACKGROUND_PROCESSES 1024
+// Maintain a small array of processes launched in the background!
+static pid_t background_pids[MAX_BACKGROUND_PROCESSES];
+static size_t background_count = 0;
+
+void initialise_executor(void) {
+    struct sigaction sa;
+    sa.sa_handler = handle_sigchld;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    if(sigaction(SIGCHLD, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }
+}
+
+// SIGCHLD handler!
+static void handle_sigchld(int signal) {
+    (void)signal;
+    int status;
+    pid_t pid;
+    while((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        if(is_background_pid(pid)) {
+            printf("Background process %d finished\n", pid);
+        }
+    }
+}
 
 // Helper func to check if the file is exec or not!
 static bool is_executable(const char *path) {
@@ -730,6 +759,23 @@ static bool execute_pipeline(Token *tokens) {
     free(output_pipes);
     free(pipes);
     return true;
+}
+
+// Helper functions for background processes!
+static bool is_background_pid(pid_t pid) {
+    for(size_t i = 0; i < background_count; i++) {
+        if(background_pids[i] == pid) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void add_background_pid(pid_t pid) {
+    if(background_count < MAX_BACKGROUND_PROCESSES) {
+        background_pids[background_count] = pid;
+        background_count++;
+    }
 }
 
 // We now fork() and ask the child to exec the cmd!
