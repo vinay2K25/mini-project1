@@ -17,14 +17,20 @@
 static pid_t background_pids[MAX_BACKGROUND_PROCESSES];
 static size_t background_count = 0;
 
-void initialise_executor(void) {
-    struct sigaction sa;
-    sa.sa_handler = handle_sigchld;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
-    if(sigaction(SIGCHLD, &sa, NULL) == -1) {
-        perror("sigaction");
-        exit(EXIT_FAILURE);
+// Helper functions for background processes!
+static bool is_background_pid(pid_t pid) {
+    for(size_t i = 0; i < background_count; i++) {
+        if(background_pids[i] == pid) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void add_background_pid(pid_t pid) {
+    if(background_count < MAX_BACKGROUND_PROCESSES) {
+        background_pids[background_count] = pid;
+        background_count++;
     }
 }
 
@@ -37,6 +43,17 @@ static void handle_sigchld(int signal) {
         if(is_background_pid(pid)) {
             printf("Background process %d finished\n", pid);
         }
+    }
+}
+
+void initialise_executor(void) {
+    struct sigaction sa;
+    sa.sa_handler = handle_sigchld;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    if(sigaction(SIGCHLD, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -761,23 +778,6 @@ static bool execute_pipeline(Token *tokens) {
     return true;
 }
 
-// Helper functions for background processes!
-static bool is_background_pid(pid_t pid) {
-    for(size_t i = 0; i < background_count; i++) {
-        if(background_pids[i] == pid) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static void add_background_pid(pid_t pid) {
-    if(background_count < MAX_BACKGROUND_PROCESSES) {
-        background_pids[background_count] = pid;
-        background_count++;
-    }
-}
-
 // We now fork() and ask the child to exec the cmd!
 static bool execute_external(Token *tokens, bool background) {
     char resolved_path[PATH_MAX];
@@ -941,12 +941,17 @@ static bool execute_external(Token *tokens, bool background) {
         }
         free(output_fds);
     }
-    if(!background) {
+
+    if(background) {
+        add_background_pid(child);
+    }
+    else {
         int status;
         if(waitpid(child, &status, 0) == -1) {
             perror("waitpid");
         }
     }
+    
     free(argv);
     return true;
 }
