@@ -33,7 +33,8 @@ static bool execute_one_command(Token *start, Token *end) {
         success = true;
     }
     else {
-        success = execute_command(start);
+        bool background = (end != NULL && end->type == TOKEN_AMP);
+        success = execute_command(start, background);
     }
     if(end != NULL) {
         end->next = saved_next;

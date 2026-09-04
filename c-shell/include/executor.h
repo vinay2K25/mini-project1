@@ -3,6 +3,6 @@
 
 #include <stdbool.h>
 #include "lexer.h"
-bool execute_command(Token *tokens);
+bool execute_command(Token *tokens, bool background);
 
 #endif

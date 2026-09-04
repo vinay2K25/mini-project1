@@ -733,7 +733,7 @@ static bool execute_pipeline(Token *tokens) {
 }
 
 // We now fork() and ask the child to exec the cmd!
-static bool execute_external(Token *tokens) {
+static bool execute_external(Token *tokens, bool background) {
     char resolved_path[PATH_MAX];
     if(!resolve_command(tokens->value, resolved_path, sizeof(resolved_path))) {
         printf("cshell: command not found (%s)\n", tokens->value[0] == '%' ? tokens->value + 1 : tokens->value);
@@ -895,15 +895,17 @@ static bool execute_external(Token *tokens) {
         }
         free(output_fds);
     }
-    int status;
-    if(waitpid(child, &status, 0) == -1) {
-        perror("waitpid");
+    if(!background) {
+        int status;
+        if(waitpid(child, &status, 0) == -1) {
+            perror("waitpid");
+        }
     }
     free(argv);
     return true;
 }
 
-bool execute_command(Token *tokens) {
+bool execute_command(Token *tokens, bool background) {
     if(tokens == NULL || tokens->type != TOKEN_WORD) {
         return false;
     }
@@ -917,5 +919,5 @@ bool execute_command(Token *tokens) {
         }
         current = current->next;
     }
-    return execute_external(tokens);
+    return execute_external(tokens, background);
 }
