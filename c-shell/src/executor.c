@@ -13,26 +13,35 @@
 #include "builtins.h"
 
 #define MAX_BACKGROUND_PROCESSES 1024
+typedef struct {
+    pid_t pid;
+    unsigned long job_number;
+    char command[4096];
+    bool active;
+} BackgroundJob;
+static BackgroundJob background_jobs[MAX_BACKGROUND_PROCESSES];
+static unsigned long next_job_number = 1;
+
 // Maintain a small array of processes launched in the background!
-static pid_t background_pids[MAX_BACKGROUND_PROCESSES];
-static size_t background_count = 0;
+// static pid_t background_pids[MAX_BACKGROUND_PROCESSES];
+// static size_t background_count = 0;
 
 // Helper functions for background processes!
-static bool is_background_pid(pid_t pid) {
-    for(size_t i = 0; i < background_count; i++) {
-        if(background_pids[i] == pid) {
-            return true;
-        }
-    }
-    return false;
-}
+// static bool is_background_pid(pid_t pid) {
+//     for(size_t i = 0; i < background_count; i++) {
+//         if(background_pids[i] == pid) {
+//             return true;
+//         }
+//     }
+//     return false;
+// }
 
-static void add_background_pid(pid_t pid) {
-    if(background_count < MAX_BACKGROUND_PROCESSES) {
-        background_pids[background_count] = pid;
-        background_count++;
-    }
-}
+// static void add_background_pid(pid_t pid) {
+//     if(background_count < MAX_BACKGROUND_PROCESSES) {
+//         background_pids[background_count] = pid;
+//         background_count++;
+//     }
+// }
 
 // SIGCHLD handler!
 static void handle_sigchld(int signal) {
@@ -40,10 +49,48 @@ static void handle_sigchld(int signal) {
     int status;
     pid_t pid;
     while((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        if(is_background_pid(pid)) {
-            printf("Background process %d finished\n", pid);
+        for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
+            if(!background_jobs[i].active || background_jobs[i].pid != pid) {
+                continue;
+            }
+            char message[4096];
+            if(WIFEXITED(status)) {
+                snprintf(message, sizeof(message), "\n%s with pid %d exited normally\n", background_jobs[i].command, pid);
+            }
+            else if(WIFSIGNALED(status)) {
+                snprintf(message, sizeof(message), "\n%s with pid %d exited abnormally\n", background_jobs[i].command, pid)
+            }
+            else {
+                break;
+            }
+            write(STDOUT_FILENO, message, strlen(message));
+            background_jobs[i].active = false;
+            break;
         }
     }
+}
+
+static int find_free_job_slot() {
+    for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
+        if(!background_jobs[i].active) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static bool add_background_job(pid_t pid, const char *command) {
+    int slot = find_free_job_slot();
+    if(slot == -1) {
+        fprintf(stderr, "cshell: too many background jobs\n");
+        return false;
+    }
+    background_jobs[slot].pid = pid;
+    background_jobs[slot].job_number = next_job_number++;
+    background_jobs[slot].active = true;
+    snprintf(background_jobs[slot].command, sizeof(background_jobs[slot].command), "%s", command);
+    printf("[%lu] %d\n", background_jobs[slot].job_number, background_jobs[slot].pid);
+    return true;
 }
 
 void initialise_executor(void) {
