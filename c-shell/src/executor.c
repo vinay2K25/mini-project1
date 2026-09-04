@@ -58,7 +58,7 @@ static void handle_sigchld(int signal) {
                 snprintf(message, sizeof(message), "\n%s with pid %d exited normally\n", background_jobs[i].command, pid);
             }
             else if(WIFSIGNALED(status)) {
-                snprintf(message, sizeof(message), "\n%s with pid %d exited abnormally\n", background_jobs[i].command, pid)
+                snprintf(message, sizeof(message), "\n%s with pid %d exited abnormally\n", background_jobs[i].command, pid);
             }
             else {
                 break;
@@ -825,6 +825,27 @@ static bool execute_pipeline(Token *tokens) {
     return true;
 }
 
+static void build_command_string(Token *tokens, char *buffer, size_t buffer_size) {
+    buffer[0] = '\0';
+    size_t used = 0;
+    for(Token *current = tokens; current != NULL && current->type == TOKEN_WORD; current = current->next) {
+        size_t remaining = buffer_size - used;
+        if(remaining <= 1) {
+            break;
+        }
+        int written = snprintf(buffer + used, remaining, "%s%s", used == 0 ? "" : " ", current->value);
+        if(written < 0) {
+            buffer[0] = '\0';
+            return;
+        }
+        if((size_t)written > remaining) {
+            buffer[buffer_size - 1] = '\0';
+            return;
+        }
+        used += (size_t)written;
+    }
+}
+
 // We now fork() and ask the child to exec the cmd!
 static bool execute_external(Token *tokens, bool background) {
     char resolved_path[PATH_MAX];
@@ -835,6 +856,28 @@ static bool execute_external(Token *tokens, bool background) {
     char **argv = build_argv(tokens);
     if(argv == NULL) {
         return false;
+    }
+
+    // Background execution handling!
+    char command_string[4096];
+    build_command_string(tokens, command_string, sizeof(command_string));
+    if(background) {
+        pid_t child = fork();
+        if(child < 0) {
+            perror("fork");
+            free(argv);
+            return false;
+        }
+        if(child == 0) {
+            execv(resolved_path, argv);
+            perror("exec");
+            _exit(EXIT_FAILURE);
+        }
+        if(!add_background_job(child, command_string)) {
+            waitpid(child, NULL, 0);
+        }
+        free(argv);
+        return true;
     }
 
     // Input redir!
@@ -890,6 +933,8 @@ static bool execute_external(Token *tokens, bool background) {
             return false;
         }
     }
+    char command_string[4096];
+    build_command_string(tokens, command_string, sizeof(command_string));
 
     pid_t child = fork();
     if(child < 0) {
@@ -988,11 +1033,7 @@ static bool execute_external(Token *tokens, bool background) {
         }
         free(output_fds);
     }
-
-    if(background) {
-        add_background_pid(child);
-    }
-    else {
+    if(!background) {
         int status;
         if(waitpid(child, &status, 0) == -1) {
             perror("waitpid");

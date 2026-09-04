@@ -56,7 +56,8 @@ bool execute_sequential(Token *tokens) {
         }
         // '&' will be handled in D-2!
         if(end->type == TOKEN_AMP) {
-            break;
+            current = end->next;
+            continue;
         }
         // Skip the incoming ';' and start executing the next command!
         current = end->next;
