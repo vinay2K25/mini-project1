@@ -53,7 +53,7 @@ static void handle_sigchld(int signal) {
             if(!background_jobs[i].active || background_jobs[i].pid != pid) {
                 continue;
             }
-            char message[4096];
+            char message[8192];
             if(WIFEXITED(status)) {
                 snprintf(message, sizeof(message), "\n%s with pid %d exited normally\n", background_jobs[i].command, pid);
             }
@@ -933,9 +933,6 @@ static bool execute_external(Token *tokens, bool background) {
             return false;
         }
     }
-    char command_string[4096];
-    build_command_string(tokens, command_string, sizeof(command_string));
-
     pid_t child = fork();
     if(child < 0) {
         perror("fork");
