@@ -26,6 +26,22 @@ static BackgroundJob background_jobs[MAX_BACKGROUND_PROCESSES];
 static unsigned long next_job_number = 1;
 static volatile sig_atomic_t foreground_running = 0;
 
+// Helper func to block/un-block sigchld!
+static void block_sigchld(sigset_t *old_mask) {
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGCHLD);
+    if(sigprocmask(SIG_BLOCK, &mask, old_mask) == -1) {
+        perror("sigprocmask");
+    }
+}
+
+static void unblock_sigchld(const sigset_t *old_mask) {
+    if(sigprocmask(SIG_SETMASK, old_mask, NULL) == -1) {
+        perror("sigprocmask");
+    }
+}
+
 // Maintain a small array of processes launched in the background!
 // static pid_t background_pids[MAX_BACKGROUND_PROCESSES];
 // static size_t background_count = 0;
@@ -669,6 +685,19 @@ static bool execute_pipeline(Token *tokens, bool background) {
         children[i] = child;
         // Child procc!
         if(child == 0) {
+            // Background proc handling!
+            if(background && input_count == 0 && i == 0) {
+                int null_fd = open("/dev/null", O_RDONLY);
+                if(null_fd == -1) {
+                    _exit(EXIT_FAILURE);
+                }
+                if(dup2(null_fd, STDIN_FILENO) == -1) {
+                    close(null_fd);
+                    _exit(EXIT_FAILURE);
+                }
+                close(null_fd);
+            }
+
             // Explicit input redir has more precedence than pipline input!
             if(input_count == 1) {
                 if(dup2(input_fds[0], STDIN_FILENO) == -1) {
@@ -682,18 +711,6 @@ static bool execute_pipeline(Token *tokens, bool background) {
                 if(dup2(pipes[i - 1][0], STDIN_FILENO) == -1) {
                     perror("dup2");
                     _exit(EXIT_FAILURE);
-                }
-
-                if(background && input_count == 0 && i == 0) {
-                    int null_fd = open("/dev/null", O_RDONLY);
-                    if(null_fd == -1) {
-                        _exit(EXIT_FAILURE);
-                    }
-                    if(dup2(null_fd, STDIN_FILENO) == -1) {
-                        close(null_fd);
-                        _exit(EXIT_FAILURE);
-                    }
-                    close(null_fd);
                 }
             }            
             else if(input_count > 1) {
@@ -728,18 +745,6 @@ static bool execute_pipeline(Token *tokens, bool background) {
                     _exit(EXIT_FAILURE);
                 }
                 close(input_pipe[0]);
-
-                if(background && input_count == 0 && i == 0) {
-                    int null_fd = open("/dev/null", O_RDONLY);
-                    if(null_fd == -1) {
-                        _exit(EXIT_FAILURE);
-                    }
-                    if(dup2(null_fd, STDIN_FILENO) == -1) {
-                        close(null_fd);
-                        _exit(EXIT_FAILURE);
-                    }
-                    close(null_fd);
-                }
             }
 
             // Handling multi output redir!
@@ -954,27 +959,29 @@ static bool execute_external(Token *tokens, bool background) {
         return false;
     }
 
-    // Background execution handling!
+    // Build command string for background job reporting!
     char command_string[4096];
     build_command_string(tokens, command_string, sizeof(command_string));
-    if(background) {
-        pid_t child = fork();
-        if(child < 0) {
-            perror("fork");
-            free(argv);
-            return false;
-        }
-        if(child == 0) {
-            execv(resolved_path, argv);
-            perror("exec");
-            _exit(EXIT_FAILURE);
-        }
-        if(!add_background_job(child, command_string)) {
-            waitpid(child, NULL, 0);
-        }
-        free(argv);
-        return true;
-    }
+
+    // Background execution handling!
+    // if(background) {
+    //     pid_t child = fork();
+    //     if(child < 0) {
+    //         perror("fork");
+    //         free(argv);
+    //         return false;
+    //     }
+    //     if(child == 0) {
+    //         execv(resolved_path, argv);
+    //         perror("exec");
+    //         _exit(EXIT_FAILURE);
+    //     }
+    //     if(!add_background_job(child, command_string)) {
+    //         waitpid(child, NULL, 0);
+    //     }
+    //     free(argv);
+    //     return true;
+    // }
 
     // Input redir!
     int *input_fds = NULL;
@@ -1029,6 +1036,12 @@ static bool execute_external(Token *tokens, bool background) {
             return false;
         }
     }
+
+    sigset_t old_mask;
+    if(background) {
+        block_sigchld(old_mask);
+    }
+
     pid_t child = fork();
     if(child < 0) {
         perror("fork");
@@ -1052,6 +1065,10 @@ static bool execute_external(Token *tokens, bool background) {
         return false;
     }
     if(child == 0) {
+        if(background) {
+            unblock_sigchld(&old_mask);
+        }
+
         // Redir stdin!
         if(input_count > 0) {
             close(input_pipe[1]);
