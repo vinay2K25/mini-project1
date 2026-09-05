@@ -14,10 +14,17 @@
 
 #define MAX_BACKGROUND_PROCESSES 1024
 static void build_command_string(Token *tokens, char *buffer, size_t buffer_size);
+
+typedef enum {
+    PROCESS_RUNNING,
+    PROCESS_STOPPED
+} ProcessState;
+
 typedef struct {
     pid_t pid;
     pid_t pgid;
     pid_t *pids;
+    ProcessState *states;
     size_t process_count;
     unsigned long job_number;
     char command[4096];
@@ -77,7 +84,9 @@ static void handle_sigchld(int signal) {
             write(STDOUT_FILENO, message, strlen(message));
             // Freeing pid arr after it's used!
             free(background_jobs[i].pids);
+            free(background_jobs[i].states);
             background_jobs[i].pids = NULL;
+            background_jobs[i].states = NULL;
             background_jobs[i].process_count = 0;
             background_jobs[i].active = false;
             background_jobs[i].completed = false;
@@ -104,7 +113,16 @@ static bool add_background_job(pid_t pid, pid_t pgid, const pid_t *pids, size_t 
     if(background_jobs[slot].pids == NULL) {
         return false;
     }
+    background_jobs[slot].states = malloc(process_count * sizeof(ProcessState));
+    if(background_jobs[slot].states == NULL) {
+        free(background_jobs[slot].pids);
+        background_jobs[slot].pids = NULL;
+        return false;
+    }
     memcpy(background_jobs[slot].pids, pids, process_count * sizeof(pid_t));
+    for(size_t i = 0; i < process_count; i++) {
+        background_jobs[slot].states[i] = PROCESS_RUNNING;
+    }
     background_jobs[slot].process_count = process_count;
     background_jobs[slot].pid = pid;
     background_jobs[slot].pgid = pgid;
@@ -131,7 +149,9 @@ static void print_completed_background_jobs() {
         }
         // Freeing pid arr after use!
         free(background_jobs[i].pids);
+        free(background_jobs[i].states);
         background_jobs[i].pids = NULL;
+        background_jobs[i].states = NULL;
         background_jobs[i].process_count = 0;
         background_jobs[i].active = false;
         background_jobs[i].completed = false;
