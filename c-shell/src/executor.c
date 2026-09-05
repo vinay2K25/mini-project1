@@ -17,6 +17,8 @@ static void build_command_string(Token *tokens, char *buffer, size_t buffer_size
 typedef struct {
     pid_t pid;
     pid_t pgid;
+    pid_t *pids;
+    size_t process_count;
     unsigned long job_number;
     char command[4096];
     bool active;
@@ -73,6 +75,10 @@ static void handle_sigchld(int signal) {
                 snprintf(message, sizeof(message), "\n%s with pid %d exited abnormally\n", background_jobs[i].command, pid);
             }
             write(STDOUT_FILENO, message, strlen(message));
+            // Freeing pid arr after it's used!
+            free(background_jobs[i].pids);
+            background_jobs[i].pids = NULL;
+            background_jobs[i].process_count = 0;
             background_jobs[i].active = false;
             background_jobs[i].completed = false;
         }
@@ -88,12 +94,18 @@ static int find_free_job_slot() {
     return -1;
 }
 
-static bool add_background_job(pid_t pid, pid_t pgid, const char *command) {
+static bool add_background_job(pid_t pid, pid_t pgid, const pid_t *pids, size_t process_count, const char *command) {
     int slot = find_free_job_slot();
     if(slot == -1) {
         fprintf(stderr, "cshell: too many background jobs\n");
         return false;
     }
+    background_jobs[slot].pids = malloc(process_count * sizeof(pid_t));
+    if(background_jobs[slot].pids == NULL) {
+        return false;
+    }
+    memcpy(background_jobs[slot].pids, pids, process_count * sizeof(pid_t));
+    background_jobs[slot].process_count = process_count;
     background_jobs[slot].pid = pid;
     background_jobs[slot].pgid = pgid;
     background_jobs[slot].job_number = next_job_number++;
@@ -117,6 +129,10 @@ static void print_completed_background_jobs() {
         else {
             printf("%s with pid %d exited abnormally\n", background_jobs[i].command, background_jobs[i].pid);
         }
+        // Freeing pid arr after use!
+        free(background_jobs[i].pids);
+        background_jobs[i].pids = NULL;
+        background_jobs[i].process_count = 0;
         background_jobs[i].active = false;
         background_jobs[i].completed = false;
     }
@@ -797,7 +813,7 @@ static bool execute_pipeline(Token *tokens, bool background) {
         char command_string[4096];
         build_command_string(tokens, command_string, sizeof(command_string));
         if(children[0] != -1) {
-            if(!add_background_job(children[0], children[0], command_string)) {
+            if(!add_background_job(children[0], pgid, children, command_count, command_string)) {
                 for(size_t i = 0; i < command_count; i++) {
                     if(children[i] != -1) {
                         kill(children[i], SIGTERM);
@@ -1059,7 +1075,7 @@ static bool execute_external(Token *tokens, bool background) {
         free(output_fds);
     }
     if(background) {
-        if(!add_background_job(child, child, command_string)) {
+        if(!add_background_job(child, child, &child, 1, command_string)) {
             kill(child, SIGTERM);
         }
         unblock_sigchld(&old_mask);
