@@ -18,9 +18,12 @@ typedef struct {
     unsigned long job_number;
     char command[4096];
     bool active;
+    bool completed;
+    bool normal;
 } BackgroundJob;
 static BackgroundJob background_jobs[MAX_BACKGROUND_PROCESSES];
 static unsigned long next_job_number = 1;
+static volatile sig_atomic_t foreground_running = 0;
 
 // Maintain a small array of processes launched in the background!
 // static pid_t background_pids[MAX_BACKGROUND_PROCESSES];
@@ -55,16 +58,27 @@ static void handle_sigchld(int signal) {
             }
             char message[8192];
             if(WIFEXITED(status)) {
-                snprintf(message, sizeof(message), "\n%s with pid %d exited normally\n", background_jobs[i].command, pid);
+                // snprintf(message, sizeof(message), "\n%s with pid %d exited normally\n", background_jobs[i].command, pid);
+                background_jobs[i].completed = true;
+                background_jobs[i].normal = true;
             }
             else if(WIFSIGNALED(status)) {
-                snprintf(message, sizeof(message), "\n%s with pid %d exited abnormally\n", background_jobs[i].command, pid);
+                // snprintf(message, sizeof(message), "\n%s with pid %d exited abnormally\n", background_jobs[i].command, pid);
+                background_jobs[i].completed = true;
+                background_jobs[i].normal = false;
             }
-            else {
-                break;
+            if(!foreground_running) {
+                char message[8192];
+                if(background_jobs[i].normal) {
+                    snprintf(message, sizeof(message), "\n%s with pid %d exited normally\n", background_jobs[i].command, pid);
+                }
+                else {
+                    snprintf(message, sizeof(message), "\n%s with pid %d exited abnormally\n", background_jobs[i].command, pid);
+                }
+                write(STDOUT_FILENO, message, strlen(message));
+                background_jobs[i].active = false;
+                background_jobs[i].completed = false;
             }
-            write(STDOUT_FILENO, message, strlen(message));
-            background_jobs[i].active = false;
             break;
         }
     }
@@ -88,9 +102,28 @@ static bool add_background_job(pid_t pid, const char *command) {
     background_jobs[slot].pid = pid;
     background_jobs[slot].job_number = next_job_number++;
     background_jobs[slot].active = true;
+    background_jobs[slot].completed = false;
+    background_jobs[slot].normal = false;
     snprintf(background_jobs[slot].command, sizeof(background_jobs[slot].command), "%s", command);
     printf("[%lu] %d\n", background_jobs[slot].job_number, background_jobs[slot].pid);
     return true;
+}
+
+// Helper function to print deferred completions!
+static void print_completed_background_jobs() {
+    for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
+        if(!background_jobs[i].active || !background_jobs[i].completed) {
+            continue;
+        }
+        if(background_jobs[i].normal) {
+            printf("%s with pid %d exited normally\n", background_jobs[i].command, background_jobs[i].pid);
+        }
+        else {
+            printf("%s with pid %d exited abnormally\n", background_jobs[i].command, background_jobs[i].pid);
+        }
+        background_jobs[i].active = false;
+        background_jobs[i].completed = false;
+    }
 }
 
 void initialise_executor(void) {
