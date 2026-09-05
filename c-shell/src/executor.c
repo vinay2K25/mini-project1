@@ -256,6 +256,112 @@ static bool job_has_live_processes(BackgroundJob *job) {
     return false;
 }
 
+static void resume_foreground(BackgroundJob *job, unsigned int timeout, bool has_timeout) {
+    process_sigchld();
+    if(job->completed || !job->active || !job_has_live_processes(job)) {
+        return;
+    }
+    if(kill(-job->pgid, SIGCONT) == -1) {
+        return;
+    }
+    for(size_t i = 0; i < job->process_count; i++) {
+        if(job->pids[i] != -1) {
+            job->states[i] = PROCESS_RUNNING;
+        }
+    }
+    if(tcsetpgrp(shell_terminal, job->pgid) == -1) {
+        perror("tcsetpgrp");
+        return;
+    }
+    foreground_running = 1;
+    printf("%s\n", job->command);
+    struct sigaction old_alarm_action;
+    struct sigaction alarm_action;
+    if(has_timeout) {
+        alarm_action.sa_handler = handle_resume_alarm;
+        sigemptyset(&alarm_action.sa_mask);
+        alarm_action.sa_flags = 0;
+        if(sigaction(SIGALRM, &alarm_action, &old_alarm_action) == -1) {
+            perror("sigaction");
+        }
+        else {
+            resume_timeout = 0;
+            alarm(timeout);
+        }
+    }
+    bool stopped = false;
+    bool timed_out = false;
+    for(size_t i = 0; i < job->process_count; i++) {
+        if(job->pids[i] == -1) {
+            continue;
+        }
+        int status;
+        while(true) {
+            pid_t result = waitpid(job->pids[i], &status, WNOHANG);
+            if(result == -1) {
+                if(errno == EINTR) {
+                    if(resume_timeout) {
+                        timed_out = true;
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+            if(WIFSTOPPED(status)) {
+                job->pids[i] = -1;
+                break;
+            }
+            if(WIFSIGNALED(status)) {
+                job->normal = false;
+                job->pids[i] = -1;
+                break;
+            }
+        }
+        if(timed_out || stopped) {
+            break;
+        }
+    }
+    if(timed_out) {
+        kill(-job->pgid, SIGTERM);
+        printf("resume: job timed out\n");
+    }
+    if(has_timeout) {
+        alarm(0);
+        if(sigaction(SIGALRM, &old_alarm_action, NULL) == -1) {
+            perror("sigaction");
+        }
+    }
+    if(stopped) {
+        for(size_t i = 0; i < job->process_count; i++) {
+            if(job->pids[i] != -1) {
+                job->states[i] = PROCESS_STOPPED;
+            }
+        }
+    }
+    bool all_exited = true;
+    for(size_t i = 0; i < job->process_count; i++) {
+        if(job->pids[i] != -1) {
+            all_exited = false;
+            break;
+        }
+    }
+    if(all_exited) {
+        job->completed = true;
+    }
+    if(tcsetpgrp(shell_terminal, shell_pgid) == -1) {
+        perror("tcsetpgrp");
+    }
+    foreground_running = 0;
+    if(stopped) {
+        printf("\n");
+        printf("[%lu] + Stopped %s\n", job->job_number, job->command);
+    }
+    if(job->completed) {
+        print_completed_background_jobs();
+    }
+}
+
 void print_activities() {
     process_sigchld();
     for(unsigned long number = 1; number < next_job_number; number++) {
