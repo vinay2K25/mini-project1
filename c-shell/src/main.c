@@ -18,17 +18,27 @@ int main()
     initialise_builtins();
     initialise_executor();
     char input[4096];
+    bool eof_seen = false;
     while(true) {
         print_completed_background_jobs();
         print_prompt();
         if(fgets(input, sizeof(input), stdin) == NULL) {
-            if(errno == EINTR) {
-                clearerr(stdin);
-                print_completed_background_jobs();
-                continue;
+            if(has_stopped_jobs()) {
+                if(!eof_seen) {
+                    printf("cshell: there are stopped jobs\n");
+                    eof_seen = true;
+                    clearerr(stdin);
+                    continue;
+                }
+                shutdown_executor();
+                printf("\n");
+                break;
             }
+            shutdown_executor();
+            printf("\n");
             break;
         }
+        eof_seen = false;
         bool lex_error;
         Token *tokens = lex(input, &lex_error);
         // Informing the user of a lexical error, that is, an error in their command-syntax!

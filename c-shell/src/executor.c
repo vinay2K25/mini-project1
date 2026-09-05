@@ -257,6 +257,32 @@ void print_activities() {
     }
 }
 
+bool has_stopped_jobs() {
+    process_sigchld();
+    for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
+        if(!background_jobs[i].active || background_jobs[i].completed) {
+            continue;
+        }
+        for(size_t j = 0; j < background_jobs[i].process_count; j++) {
+            if(background_jobs[i].pids[j] != -1 && background_jobs[i].states[j] == PROCESS_STOPPED) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void shutdown_executor() {
+    for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
+        if(!background_jobs[i].active || background_jobs[i].completed) {
+            continue;
+        }
+        if(background_jobs[i].pid > 0) {
+            kill(-background_jobs[i].pgid, SIGHUP);
+        }
+    }
+}
+
 // Helper functions for terminal controls!
 static void ignore_signal(int signal_number) {
     struct sigaction sa;
@@ -1051,12 +1077,22 @@ static bool execute_pipeline(Token *tokens, bool background) {
 static void build_command_string(Token *tokens, char *buffer, size_t buffer_size) {
     buffer[0] = '\0';
     size_t used = 0;
-    for(Token *current = tokens; current != NULL && current->type == TOKEN_WORD; current = current->next) {
+    for(Token *current = tokens; current != NULL; current = current->next) {
+        // Stop at the end of command sequence!
+        if(current->type == TOKEN_SEMI || current->type == TOKEN_AMP) {
+            break;
+        }
         size_t remaining = buffer_size - used;
         if(remaining <= 1) {
             break;
         }
-        int written = snprintf(buffer + used, remaining, "%s%s", used == 0 ? "" : " ", current->value);
+        int written;
+        if(current->type == TOKEN_PIPE) {
+            written = snprintf(buffer + used, remaining, " | ");
+        }
+        else {
+            written = snprintf(buffer + used, remaining, "%s%s", used == 0 ? "" : " ", current->value);
+        }
         if(written < 0) {
             buffer[0] = '\0';
             return;
@@ -1066,6 +1102,10 @@ static void build_command_string(Token *tokens, char *buffer, size_t buffer_size
             return;
         }
         used += (size_t)written;
+    }
+    // Remove trailing white-spaces!
+    while(used > 0 && buffer[used - 1] == ' ') {
+        buffer[--used] = '\0';
     }
 }
 
