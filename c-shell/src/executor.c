@@ -982,6 +982,10 @@ static bool execute_pipeline(Token *tokens, bool background) {
     }
     if(!background) {
         foreground_running = 1;
+        // Give the terminal to the entire foreground pipeline!
+        if(tcsetpgrp(shell_terminal, pgid) == -1) {
+            perror("tcsetpgrp");
+        }
         for(size_t i = 0; i < command_count; i++) {
             if(children[i] != -1) {
                 int status;
@@ -1001,6 +1005,10 @@ static bool execute_pipeline(Token *tokens, bool background) {
                     break;
                 }
             }
+        }
+        // Take the terminal back after the pipeline finishes!
+        if(tcsetpgrp(shell_terminal, shell_pgid) == -1) {
+            perror("tcsetpgrp");
         }
         foreground_running = 0;
         print_completed_background_jobs();
@@ -1242,11 +1250,19 @@ static bool execute_external(Token *tokens, bool background) {
     else {
         int status;
         foreground_running = 1;
+        // Give the terminal the foreground process group!
+        if(tcsetpgrp(shell_terminal, child) == -1) {
+            perror("tcsetpgrp");
+        }
         while(waitpid(child, &status, 0) == -1) {
             if(errno == EINTR) {
                 continue;
             }
             break;
+        }
+        // Take terminal back after the command finishes!
+        if(tcsetpgrp(shell_terminal, shell_pgid) == -1) {
+            perror("tcsetpgrp");
         }
         foreground_running = 0;
         print_completed_background_jobs();
