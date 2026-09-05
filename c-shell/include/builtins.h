@@ -6,5 +6,6 @@
 void initialise_builtins();
 bool is_builtin_command(Token *tokens);
 bool execute_builtin(Token *tokens);
+void resume_job(Token *tokens);
 
 #endif

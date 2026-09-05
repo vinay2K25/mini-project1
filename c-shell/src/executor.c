@@ -11,6 +11,8 @@
 #include <errno.h>
 #include "executor.h"
 #include "builtins.h"
+#include <ctype.h>
+#include <limits.h>
 
 #define MAX_BACKGROUND_PROCESSES 1024
 static void build_command_string(Token *tokens, char *buffer, size_t buffer_size);
@@ -37,9 +39,15 @@ static BackgroundJob background_jobs[MAX_BACKGROUND_PROCESSES];
 static unsigned long next_job_number = 1;
 static volatile sig_atomic_t foreground_running = 0;
 static volatile sig_atomic_t sigchld_received = 0;
+static volatile sig_atomic_t resume_timeout = 0;
 
 static pid_t shell_pgid;
 static int shell_terminal;
+
+static void handle_resume_alarm(int signal) {
+    (void)signal;
+    resume_timeout = 1;
+}
 
 // Helper func to block/un-block sigchld!
 static void block_sigchld(sigset_t *old_mask) {
@@ -224,6 +232,28 @@ void print_completed_background_jobs() {
         background_jobs[i].active = false;
         background_jobs[i].completed = false;
     }
+}
+
+// Helper function to find a job!
+static BackgroundJob *find_job(unsigned long job_number) {
+    for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
+        if(!background_jobs[i].active) {
+            continue;
+        }
+        if(background_jobs[i].job_number == job_number) {
+            return &background_jobs[i];
+        }
+    }
+    return NULL;
+}
+
+static bool job_has_live_processes(BackgroundJob *job) {
+    for(size_t i = 0; i < job->process_count; i++) {
+        if(job->pids[i] != -1) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void print_activities() {
