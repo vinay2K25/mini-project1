@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+#include "executor.h"
 
 // PATH_MAX
 // File to store the frecencies of the directories!
@@ -1071,6 +1072,9 @@ bool is_builtin_command(Token *tokens) {
     if(strcmp(tokens->value, "locate") == 0) {
         return true;
     }
+    if(strcmp(tokens->value, "activities") == 0) {
+        return true;
+    }
     return false;    
 }
 
@@ -1093,6 +1097,10 @@ bool execute_builtin(Token *tokens) {
     }
     if(strcmp(tokens->value, "locate") == 0) {
         execute_locate(tokens);
+        return true;
+    }
+    if(strcmp(tokens->value, "activities") == 0) {
+        print_activities();
         return true;
     }
     return false;

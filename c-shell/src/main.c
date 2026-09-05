@@ -19,10 +19,12 @@ int main()
     initialise_executor();
     char input[4096];
     while(true) {
+        print_completed_background_jobs();
         print_prompt();
         if(fgets(input, sizeof(input), stdin) == NULL) {
             if(errno == EINTR) {
                 clearerr(stdin);
+                print_completed_background_jobs();
                 continue;
             }
             break;
@@ -40,10 +42,6 @@ int main()
             free_tokens(tokens);
             continue;
         }
-        // De-bugging func!
-        // printf("parse: %s\n", parse_result ? "valid" : "invalid");
-        // print_tokens(tokens);
-
         if(!execute_builtin(tokens)) {
             execute_sequential(tokens);
         }

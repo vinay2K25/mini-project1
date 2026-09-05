@@ -36,6 +36,7 @@ typedef struct {
 static BackgroundJob background_jobs[MAX_BACKGROUND_PROCESSES];
 static unsigned long next_job_number = 1;
 static volatile sig_atomic_t foreground_running = 0;
+static volatile sig_atomic_t sigchld_received = 0;
 
 // Helper func to block/un-block sigchld!
 static void block_sigchld(sigset_t *old_mask) {
@@ -56,46 +57,63 @@ static void unblock_sigchld(const sigset_t *old_mask) {
 // SIGCHLD handler!
 static void handle_sigchld(int signal) {
     (void)signal;
+    sigchld_received = 1;
+}
+
+static void process_sigchld() {
+    if(!sigchld_received) {
+        return;
+    }
+    sigchld_received = 0;
     int status;
     for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
         if(!background_jobs[i].active) {
             continue;
         }
-        pid_t pid = background_jobs[i].pid;    
-        pid_t result = waitpid(pid, &status, WNOHANG);
-        if(result <= 0) {
-            continue;
+        // We check every process belonging to this job!
+        for(size_t j = 0; j < background_jobs[i].process_count; j++) {
+            // A pid of -1 indicates the process has already exited!
+            if(background_jobs[i].pids[j] == -1) {
+                continue;
+            }
+            pid_t pid = background_jobs[i].pids[j];
+            while(true) {
+                pid_t result = waitpid(pid, &status, WNOHANG | WUNTRACED); 
+                if(result == 0) {
+                    break;
+                }
+                if(result == -1) {
+                    if(errno == EINTR) {
+                        continue;
+                    }
+                    break;
+                }
+                // Process exited normally!
+                if(WIFEXITED(status)) {
+                    background_jobs[i].pids[j] = -1;
+                }
+                // Process was killed by a signal!
+                else if(WIFSIGNALED(status)) {
+                    background_jobs[i].normal = false;
+                    background_jobs[i].pids[j] = -1;
+                }
+                // Process was stopped, for example, via Control+Z!
+                else if(WIFSTOPPED(status)) {
+                    background_jobs[i].states[j] = PROCESS_STOPPED;
+                }
+            }
         }
-        if(WIFEXITED(status)) {
+        // Determine whether every process in the job has exited or not!
+        bool all_exited = true;
+        for(size_t j = 0; j < background_jobs[i].process_count; j++) {
+            if(background_jobs[i].pids[j] != -1) {
+                all_exited = false;
+                break;
+            }
+        }
+        // The job is marked as completed only when every process in the job has exited!
+        if(all_exited) {
             background_jobs[i].completed = true;
-            background_jobs[i].normal = true;
-        }
-        else if(WIFSIGNALED(status)) {
-            background_jobs[i].completed = true;
-            background_jobs[i].normal = false;
-        }
-        if(!foreground_running) {
-            char message[8192];
-            if(background_jobs[i].normal) {
-                snprintf(message, sizeof(message), "\n%s with pid %d exited normally\n", background_jobs[i].command, pid);
-            }
-            else {
-                snprintf(message, sizeof(message), "\n%s with pid %d exited abnormally\n", background_jobs[i].command, pid);
-            }
-            write(STDOUT_FILENO, message, strlen(message));
-            // Freeing pid, states, commands arr after it's used!
-            for(size_t j = 0; j < background_jobs[i].process_count; j++) {
-                free(background_jobs[i].commands[j]);
-            }
-            free(background_jobs[i].commands);
-            background_jobs[i].commands = NULL;
-            free(background_jobs[i].pids);
-            free(background_jobs[i].states);
-            background_jobs[i].pids = NULL;
-            background_jobs[i].states = NULL;
-            background_jobs[i].process_count = 0;
-            background_jobs[i].active = false;
-            background_jobs[i].completed = false;
         }
     }
 }
@@ -168,14 +186,15 @@ static bool add_background_job(pid_t pid, pid_t pgid, const pid_t *pids, size_t 
     background_jobs[slot].job_number = next_job_number++;
     background_jobs[slot].active = true;
     background_jobs[slot].completed = false;
-    background_jobs[slot].normal = false;
+    background_jobs[slot].normal = true;
     snprintf(background_jobs[slot].command, sizeof(background_jobs[slot].command), "%s", command);
     printf("[%lu] %d\n", background_jobs[slot].job_number, background_jobs[slot].pid);
     return true;
 }
 
 // Helper function to print deferred completions!
-static void print_completed_background_jobs() {
+void print_completed_background_jobs() {
+    process_sigchld();
     for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
         if(!background_jobs[i].active || !background_jobs[i].completed) {
             continue;
@@ -199,6 +218,37 @@ static void print_completed_background_jobs() {
         background_jobs[i].process_count = 0;
         background_jobs[i].active = false;
         background_jobs[i].completed = false;
+    }
+}
+
+void print_activities() {
+    process_sigchld();
+    for(unsigned long number = 1; number < next_job_number; number++) {
+        for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
+            if(!background_jobs[i].active) {
+                continue;
+            }
+            if(background_jobs[i].job_number != number) {
+                continue;
+            }
+            if(background_jobs[i].completed) {
+                continue;
+            }
+            printf("[%lu] pgid %d\n", background_jobs[i].job_number, background_jobs[i].pgid);
+            for(size_t j = 0; j < background_jobs[i].process_count; j++) {
+                if(background_jobs[i].pids[j] == -1) {
+                    continue;
+                }
+                const char *state;
+                if(background_jobs[i].states[j] == PROCESS_RUNNING) {
+                    state = "Running";
+                }
+                else {
+                    state = "Stopped";
+                }
+                printf("    %d %s %s\n", background_jobs[i].pids[j], background_jobs[i].commands[j], state);
+            }
+        }
     }
 }
 
@@ -539,6 +589,10 @@ static bool execute_pipeline(Token *tokens, bool background) {
         return false;
     }
     pid_t pgid = -1;
+    sigset_t old_mask;
+    if(background) {
+        block_sigchld(&old_mask);
+    }
 
     // A pipeline containing N cmd needs N - 1 pipes!
     int (*pipes)[2] = malloc((command_count - 1) * sizeof(int[2]));
@@ -885,6 +939,7 @@ static bool execute_pipeline(Token *tokens, bool background) {
                 }
             }
         }
+        unblock_sigchld(&old_mask);
     }
     if(!background) {
         foreground_running = 1;
