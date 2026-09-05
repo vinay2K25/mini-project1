@@ -458,6 +458,8 @@ static bool execute_pipeline(Token *tokens, bool background) {
     if(command_count < 2) {
         return false;
     }
+    pid_t pgid = -1;
+
     // A pipeline containing N cmd needs N - 1 pipes!
     int (*pipes)[2] = malloc((command_count - 1) * sizeof(int[2]));
 
@@ -589,6 +591,19 @@ static bool execute_pipeline(Token *tokens, bool background) {
         children[i] = child;
         // Child procc!
         if(child == 0) {
+            if(i == 0) {
+                if(setpgid(0, 0) == -1) {
+                    perror("setpgid");
+                    _exit(EXIT_FAILURE);
+                }
+            }
+            else {
+                if(setpgid(0, pgid) == -1) {
+                    perror("setpgid");
+                    _exit(EXIT_FAILURE);
+                }
+            }
+
             // Background proc handling!
             if(background && input_count == 0 && i == 0) {
                 int null_fd = open("/dev/null", O_RDONLY);
@@ -705,6 +720,15 @@ static bool execute_pipeline(Token *tokens, bool background) {
             execv(resolved_path, argv);
             _exit(EXIT_FAILURE);
         }
+        // Parent assigns all pipeline children to the same process group!
+        if(child > 0) {
+            if(i == 0) {
+                pgid = child;
+            }
+            if(setpgid(child, pgid) == -1) {
+                perror("setpgid");
+            }
+        } 
 
         pid_t output_writer = -1;
         if(output_count > 1) {
