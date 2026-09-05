@@ -130,7 +130,7 @@ static int find_free_job_slot() {
     return -1;
 }
 
-static bool add_background_job(pid_t pid, pid_t pgid, const pid_t *pids, size_t process_count, Token *tokens, const char *command) {
+static bool add_background_job(pid_t pid, pid_t pgid, const pid_t *pids, size_t process_count, Token *tokens, const char *command, ProcessState initial_state, bool print_start) {
     int slot = find_free_job_slot();
     if(slot == -1) {
         fprintf(stderr, "cshell: too many background jobs\n");
@@ -156,7 +156,7 @@ static bool add_background_job(pid_t pid, pid_t pgid, const pid_t *pids, size_t 
     }
     memcpy(background_jobs[slot].pids, pids, process_count * sizeof(pid_t));
     for(size_t i = 0; i < process_count; i++) {
-        background_jobs[slot].states[i] = PROCESS_RUNNING;
+        background_jobs[slot].states[i] = initial_state;
     }
     Token *current = tokens;
     for(size_t i = 0; i < process_count; i++) {
@@ -191,7 +191,9 @@ static bool add_background_job(pid_t pid, pid_t pgid, const pid_t *pids, size_t 
     background_jobs[slot].completed = false;
     background_jobs[slot].normal = true;
     snprintf(background_jobs[slot].command, sizeof(background_jobs[slot].command), "%s", command);
-    printf("[%lu] %d\n", background_jobs[slot].job_number, background_jobs[slot].pid);
+    if(print_start) {
+        printf("[%lu] %d\n", background_jobs[slot].job_number, background_jobs[slot].pid);
+    }
     return true;
 }
 
@@ -970,7 +972,7 @@ static bool execute_pipeline(Token *tokens, bool background) {
         char command_string[4096];
         build_command_string(tokens, command_string, sizeof(command_string));
         if(children[0] != -1) {
-            if(!add_background_job(children[0], pgid, children, command_count, tokens, command_string)) {
+            if(!add_background_job(children[0], pgid, children, command_count, tokens, command_string, PROCESS_RUNNING, true)) {
                 for(size_t i = 0; i < command_count; i++) {
                     if(children[i] != -1) {
                         kill(children[i], SIGTERM);
@@ -1242,7 +1244,7 @@ static bool execute_external(Token *tokens, bool background) {
         free(output_fds);
     }
     if(background) {
-        if(!add_background_job(child, child, &child, 1, tokens, command_string)) {
+        if(!add_background_job(child, child, &child, 1, tokens, command_string, PROCESS_RUNNING, true)) {
             kill(child, SIGTERM);
         }
         unblock_sigchld(&old_mask);
@@ -1264,7 +1266,25 @@ static bool execute_external(Token *tokens, bool background) {
         if(tcsetpgrp(shell_terminal, shell_pgid) == -1) {
             perror("tcsetpgrp");
         }
+        if(WIFSIGNALED(status)) {
+            // Move to a new line after Control+C is printed as ^C!
+            printf("\n");
+        }
         foreground_running = 0;
+        if(WIFSTOPPED(status)) {
+            // Move to a new line after Control+Z is printed as ^Z!
+            printf("\n");
+            // The foreground process was stopped using Control+Z!
+            if(add_background_job(child, child, &child, 1, tokens, command_string, PROCESS_STOPPED, false)) {
+                // Find the job we just created and print the message!
+                for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
+                    if(background_jobs[i].active && background_jobs[i].pid == child) {
+                        printf("[%lu] + Stopped %s\n", background_jobs[i].job_number, command_string);
+                        break;
+                    }
+                }
+            }
+        }
         print_completed_background_jobs();
     }
 
