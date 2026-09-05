@@ -38,6 +38,9 @@ static unsigned long next_job_number = 1;
 static volatile sig_atomic_t foreground_running = 0;
 static volatile sig_atomic_t sigchld_received = 0;
 
+static pid_t shell_pgid;
+static int shell_terminal;
+
 // Helper func to block/un-block sigchld!
 static void block_sigchld(sigset_t *old_mask) {
     sigset_t mask;
@@ -252,7 +255,42 @@ void print_activities() {
     }
 }
 
+// Helper functions for terminal controls!
+static void ignore_signal(int signal_number) {
+    struct sigaction sa;
+    sa.sa_handler = SIG_IGN;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if(sigaction(signal_number, &sa, NULL) == -1) {
+        perror("sigaction");
+        _exit(EXIT_FAILURE);
+    }
+}
+
+static void reset_child_signals() {
+    struct sigaction sa;
+    sa.sa_handler = SIG_DFL;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if(sigaction(SIGINT, &sa, NULL) == -1 || sigaction(SIGTSTP, &sa, NULL) == -1 || sigaction(SIGTTOU, &sa, NULL) == -1) {
+        _exit(EXIT_FAILURE);
+    }
+}
+
 void initialise_executor(void) {
+    shell_terminal = STDIN_FILENO;
+    shell_pgid = getpid();
+    ignore_signal(SIGINT);
+    ignore_signal(SIGTSTP);
+    ignore_signal(SIGTTOU);
+    if(setpgid(shell_pgid, shell_pgid) == -1 && errno != EACCES) {
+        perror("setpgid");
+        exit(EXIT_FAILURE);
+    }
+    if(tcsetpgrp(shell_terminal, shell_pgid) == -1) {
+        perror("tcsetpgrp");
+        exit(EXIT_FAILURE);
+    }
     struct sigaction sa;
     sa.sa_handler = handle_sigchld;
     sigemptyset(&sa.sa_mask);
@@ -725,6 +763,7 @@ static bool execute_pipeline(Token *tokens, bool background) {
         children[i] = child;
         // Child procc!
         if(child == 0) {
+            reset_child_signals();
             if(i == 0) {
                 if(setpgid(0, 0) == -1) {
                     perror("setpgid");
@@ -1092,6 +1131,7 @@ static bool execute_external(Token *tokens, bool background) {
         return false;
     }
     if(child == 0) {
+        reset_child_signals();
         if(setpgid(0, 0) == -1) {
             perror("setpgid");
             _exit(EXIT_FAILURE);
