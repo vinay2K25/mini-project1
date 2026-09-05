@@ -362,6 +362,45 @@ static void resume_foreground(BackgroundJob *job, unsigned int timeout, bool has
     }
 }
 
+static void resume_background(BackgroundJob *job) {
+    process_sigchld();
+    if(job->completed || !job->active || !job_has_live_processes(job)) {
+        return;
+    }
+    if(kill(-job->pgid, SIGCONT) == -1) {
+        return;
+    }
+    for(size_t i = 0; i < job->process_count; i++) {
+        if(job->pids[i] != -1) {
+            job->states[i] = PROCESS_RUNNING;
+        }
+    }
+    printf("[%lu] + Running %s\n", job->job_number, job->command);
+}
+
+static bool parse_job_number(const char *value, unsigned long *job_number) {
+    if(value[0] != '%') {
+        return false;
+    }
+    if(value[1] == '\0') {
+        return false;
+    }
+    const char *number = value + 1;
+    for(size_t i = 0; number[i] != '\0'; i++) {
+        if(!isdigit((unsigned char)number[i])) {
+            return false;
+        }
+    }
+    errno = 0;
+    char *end;
+    unsigned long result = strtoul(number, &end, 10);
+    if(errno == ERANGE || *end != '\0' || result == 0) {
+        return false;
+    }
+    *job_number = result;
+    return true;
+}
+
 void print_activities() {
     process_sigchld();
     for(unsigned long number = 1; number < next_job_number; number++) {
