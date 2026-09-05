@@ -13,6 +13,7 @@
 #include "builtins.h"
 
 #define MAX_BACKGROUND_PROCESSES 1024
+static void build_command_string(Token *tokens, char *buffer, size_t buffer_size);
 typedef struct {
     pid_t pid;
     unsigned long job_number;
@@ -50,36 +51,34 @@ static volatile sig_atomic_t foreground_running = 0;
 static void handle_sigchld(int signal) {
     (void)signal;
     int status;
-    pid_t pid;
-    while((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
-            if(!background_jobs[i].active || background_jobs[i].pid != pid) {
-                continue;
-            }
+    for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
+        if(!background_jobs[i].active) {
+            continue;
+        }
+        pid_t pid = background_jobs[i].pid;    
+        pid_t result = waitpid(pid, &status, WNOHANG);
+        if(result <= 0) {
+            continue;
+        }
+        if(WIFEXITED(status)) {
+            background_jobs[i].completed = true;
+            background_jobs[i].normal = true;
+        }
+        else if(WIFSIGNALED(status)) {
+            background_jobs[i].completed = true;
+            background_jobs[i].normal = false;
+        }
+        if(!foreground_running) {
             char message[8192];
-            if(WIFEXITED(status)) {
-                // snprintf(message, sizeof(message), "\n%s with pid %d exited normally\n", background_jobs[i].command, pid);
-                background_jobs[i].completed = true;
-                background_jobs[i].normal = true;
+            if(background_jobs[i].normal) {
+                snprintf(message, sizeof(message), "\n%s with pid %d exited normally\n", background_jobs[i].command, pid);
             }
-            else if(WIFSIGNALED(status)) {
-                // snprintf(message, sizeof(message), "\n%s with pid %d exited abnormally\n", background_jobs[i].command, pid);
-                background_jobs[i].completed = true;
-                background_jobs[i].normal = false;
+            else {
+                snprintf(message, sizeof(message), "\n%s with pid %d exited abnormally\n", background_jobs[i].command, pid);
             }
-            if(!foreground_running) {
-                char message[8192];
-                if(background_jobs[i].normal) {
-                    snprintf(message, sizeof(message), "\n%s with pid %d exited normally\n", background_jobs[i].command, pid);
-                }
-                else {
-                    snprintf(message, sizeof(message), "\n%s with pid %d exited abnormally\n", background_jobs[i].command, pid);
-                }
-                write(STDOUT_FILENO, message, strlen(message));
-                background_jobs[i].active = false;
-                background_jobs[i].completed = false;
-            }
-            break;
+            write(STDOUT_FILENO, message, strlen(message));
+            background_jobs[i].active = false;
+            background_jobs[i].completed = false;
         }
     }
 }
@@ -684,6 +683,18 @@ static bool execute_pipeline(Token *tokens, bool background) {
                     perror("dup2");
                     _exit(EXIT_FAILURE);
                 }
+
+                if(background && input_count == 0 && i == 0) {
+                    int null_fd = open("/dev/null", O_RDONLY);
+                    if(null_fd == -1) {
+                        _exit(EXIT_FAILURE);
+                    }
+                    if(dup2(null_fd, STDIN_FILENO) == -1) {
+                        close(null_fd);
+                        _exit(EXIT_FAILURE);
+                    }
+                    close(null_fd);
+                }
             }            
             else if(input_count > 1) {
                 int input_pipe[2];
@@ -717,6 +728,18 @@ static bool execute_pipeline(Token *tokens, bool background) {
                     _exit(EXIT_FAILURE);
                 }
                 close(input_pipe[0]);
+
+                if(background && input_count == 0 && i == 0) {
+                    int null_fd = open("/dev/null", O_RDONLY);
+                    if(null_fd == -1) {
+                        _exit(EXIT_FAILURE);
+                    }
+                    if(dup2(null_fd, STDIN_FILENO) == -1) {
+                        close(null_fd);
+                        _exit(EXIT_FAILURE);
+                    }
+                    close(null_fd);
+                }
             }
 
             // Handling multi output redir!
@@ -836,6 +859,21 @@ static bool execute_pipeline(Token *tokens, bool background) {
         close(pipes[i][0]);
         close(pipes[i][1]);
     }
+
+    if(background) {
+        char command_string[4096];
+        build_command_string(tokens, command_string, sizeof(command_string));
+        if(children[0] != -1) {
+            if(!add_background_job(children[0], command_string)) {
+                for(size_t i = 0; i < command_count; i++) {
+                    if(children[i] != -1) {
+                        kill(children[i], SIGTERM);
+                    }
+                }
+            }
+        }
+    }
+
     // Wait for every successfully creat child!
     // for(size_t i = 0; i < command_count; i++) {
     //     if(children[i] != -1) {
@@ -1039,7 +1077,7 @@ static bool execute_external(Token *tokens, bool background) {
             if(null_fd == -1) {
                 _exit(EXIT_FAILURE);
             }
-            if(dup2(null_fd, STDOUT_FILENO) == -1) {
+            if(dup2(null_fd, STDIN_FILENO) == -1) {
                 close(null_fd);
                 _exit(EXIT_FAILURE);
             }
