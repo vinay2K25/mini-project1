@@ -145,7 +145,7 @@ void initialise_executor(void) {
     struct sigaction sa;
     sa.sa_handler = handle_sigchld;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
+    sa.sa_flags = 0;
     if(sigaction(SIGCHLD, &sa, NULL) == -1) {
         perror("sigaction");
         exit(EXIT_FAILURE);
@@ -1039,7 +1039,7 @@ static bool execute_external(Token *tokens, bool background) {
 
     sigset_t old_mask;
     if(background) {
-        block_sigchld(old_mask);
+        block_sigchld(&old_mask);
     }
 
     pid_t child = fork();
@@ -1155,7 +1155,13 @@ static bool execute_external(Token *tokens, bool background) {
         }
         free(output_fds);
     }
-    if(!background) {
+    if(background) {
+        if(!add_background_job(child, command_string)) {
+            kill(child, SIGTERM);
+        }
+        unblock_sigchld(&old_mask);
+    }   
+    else {
         int status;
         foreground_running = 1;
         while(waitpid(child, &status, 0) == -1) {
@@ -1167,7 +1173,7 @@ static bool execute_external(Token *tokens, bool background) {
         foreground_running = 0;
         print_completed_background_jobs();
     }
-    
+
     free(argv);
     return true;
 }

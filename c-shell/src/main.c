@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <pwd.h>
 #include <string.h>
+#include <errno.h>
 #include "prompt.h"
 #include "lexer.h"
 #include "parser.h"
@@ -20,6 +21,10 @@ int main()
     while(true) {
         print_prompt();
         if(fgets(input, sizeof(input), stdin) == NULL) {
+            if(errno == EINTR) {
+                clearerr(stdin);
+                continue;
+            }
             break;
         }
         bool lex_error;
