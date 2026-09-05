@@ -112,6 +112,9 @@ static void process_sigchld() {
                 else if(WIFSTOPPED(status)) {
                     background_jobs[i].states[j] = PROCESS_STOPPED;
                 }
+                else if(WIFCONTINUED(status)) {
+                    background_jobs[i].states[j] = PROCESS_RUNNING;
+                }
             }
         }
         // Determine whether every process in the job has exited or not!
@@ -399,6 +402,87 @@ static bool parse_job_number(const char *value, unsigned long *job_number) {
     }
     *job_number = result;
     return true;
+}
+
+void resume_job(Token *tokens) {
+    Token *current = tokens->next;
+    if(current == NULL || current->type != TOKEN_WORD) {
+        printf("resume: invalid syntax\n");
+        return;
+    }
+    unsigned long job_number;
+    if(!parse_job_number(current->value, &job_number)) {
+        printf("resume: invalid syntax\n");
+        return;
+    }
+    current = current->next;
+    if(current == NULL || current->type != TOKEN_WORD) {
+        printf("resume: invalid syntax\n");
+        return;
+    }
+    bool foreground = false;
+    bool background = false;
+    if(strcmp(current->value, "fg") == 0) {
+        foreground = true;
+    }
+    else if(strcmp(current->value, "bg") == 0) {
+        background = true;
+    }
+    else {
+        printf("resume: invalid syntax\n");
+        return;
+    }
+    current = current->next;
+    bool has_timeout = false;
+    unsigned int timeout = 0;
+    if(current != NULL) {
+        if(!foreground || strcmp(current->value, "--timeout") != 0) {
+            printf("resume: invalid syntax\n");
+            return;
+        }
+        current = current->next;
+        if(current == NULL || current->type != TOKEN_WORD) {
+            printf("resume: invalid syntax\n");
+            return;
+        }
+        const char *timeout_string = current->value;
+        if(timeout_string[0] == '\0') {
+            printf("resume: invalid syntax\n");
+            return;
+        }
+        for(size_t i = 0; timeout_string[i] != '\0'; i++) {
+            if(!isdigit((unsigned char)timeout_string[i])) {
+                printf("resume: invalid syntax\n");
+                return;
+            }
+        }
+        errno = 0;
+        char *end;
+        unsigned long value = strtoul(timeout_string, &end, 10);
+        if(errno == ERANGE || *end != '\0' || value > UINT_MAX) {
+            printf("resume: invalid syntax\n");
+            return;
+        }
+        timeout = (unsigned int)value;
+        has_timeout = true;
+        current = current->next;
+    }
+    if(current != NULL) {
+        printf("resume: invalid syntax\n");
+        return;
+    }
+    process_sigchld();
+    BackgroundJob *job = find_job(job_number);
+    if(job == NULL || !job->active || job->completed) {
+        printf("resume: no such job\n");
+        return;
+    }
+    if(background) {
+        resume_background(job);
+    }
+    else {
+        resume_foreground(job, timeout, has_timeout);
+    }
 }
 
 void print_activities() {
