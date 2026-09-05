@@ -984,6 +984,8 @@ static bool execute_pipeline(Token *tokens, bool background) {
     }
     if(!background) {
         foreground_running = 1;
+        bool pipeline_stopped = false;
+        bool pipeline_signaled = false;
         // Give the terminal to the entire foreground pipeline!
         if(tcsetpgrp(shell_terminal, pgid) == -1) {
             perror("tcsetpgrp");
@@ -997,8 +999,15 @@ static bool execute_pipeline(Token *tokens, bool background) {
                     }
                     break;
                 }
+                if(WIFSTOPPED(status)) {
+                    pipeline_stopped = true;
+                }
+                if(WIFSIGNALED(status)) {
+                    pipeline_signaled = true;
+                }
             }
-            if(output_writers[i] != -1) {
+            // Only wait for output writers if the pipeline itself was not stopped!
+            if(!pipeline_stopped && output_writers[i] != -1) {
                 int status;
                 while(waitpid(output_writers[i], &status, WUNTRACED) == -1) {
                     if(errno == EINTR) {
@@ -1012,7 +1021,24 @@ static bool execute_pipeline(Token *tokens, bool background) {
         if(tcsetpgrp(shell_terminal, shell_pgid) == -1) {
             perror("tcsetpgrp");
         }
+        if(pipeline_signaled) {
+            printf("\n");
+        }
         foreground_running = 0;
+        if(pipeline_stopped) {
+            printf("\n");
+            char command_string[4096];
+            build_command_string(tokens, command_string, sizeof(command_string));
+            pid_t first_pid = children[0];
+            if(add_background_job(first_pid, pgid, children, command_count, tokens, command_string, PROCESS_STOPPED, false)) {
+                for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
+                    if(background_jobs[i].active && background_jobs[i].pid == first_pid) {
+                        printf("[%lu] + Stopped %s\n", background_jobs[i].job_number, command_string);
+                        break;
+                    }
+                }
+            }
+        }
         print_completed_background_jobs();
     }
     free(output_writers);
