@@ -533,7 +533,7 @@ static Token *get_pipeline_stage(Token *tokens, size_t stage_number) {
 // }
 
 // Exec the pipeline of ext cmd!
-static bool execute_pipeline(Token *tokens) {
+static bool execute_pipeline(Token *tokens, bool background) {
     size_t command_count = count_pipeline_commands(tokens);
     // Pipeline req atleast two cmd!
     if(command_count < 2) {
@@ -837,19 +837,44 @@ static bool execute_pipeline(Token *tokens) {
         close(pipes[i][1]);
     }
     // Wait for every successfully creat child!
-    for(size_t i = 0; i < command_count; i++) {
-        if(children[i] != -1) {
-            int status;
-            if(waitpid(children[i], &status, 0) == -1) {
-                perror("waitpid");                
+    // for(size_t i = 0; i < command_count; i++) {
+    //     if(children[i] != -1) {
+    //         int status;
+    //         if(waitpid(children[i], &status, 0) == -1) {
+    //             perror("waitpid");                
+    //         }
+    //     }
+    //     if(output_writers[i] != -1) {
+    //         int status;
+    //         if(waitpid(output_writers[i], &status, 0) == -1) {
+    //             perror("waitpid");
+    //         }
+    //     }
+    // }
+    if(!background) {
+        foreground_running = 1;
+        for(size_t i = 0; i < command_count; i++) {
+            if(children[i] != -1) {
+                int status;
+                while(waitpid(children[i], &status, 0) == -1) {
+                    if(errno == EINTR) {
+                        continue;
+                    }
+                    break;
+                }
+            }
+            if(output_writers[i] != -1) {
+                int status;
+                while(waitpid(output_writers[i], &status, 0) == -1) {
+                    if(errno == EINTR) {
+                        continue;
+                    }
+                    break;
+                }
             }
         }
-        if(output_writers[i] != -1) {
-            int status;
-            if(waitpid(output_writers[i], &status, 0) == -1) {
-                perror("waitpid");
-            }
-        }
+        foreground_running = 0;
+        print_completed_background_jobs();
     }
     free(output_writers);
     free(children);
@@ -1009,6 +1034,18 @@ static bool execute_external(Token *tokens, bool background) {
             close(output_pipe[1]);
         }
 
+        if(background && input_count == 0) {
+            int null_fd = open("/dev/null", O_RDONLY);
+            if(null_fd == -1) {
+                _exit(EXIT_FAILURE);
+            }
+            if(dup2(null_fd, STDOUT_FILENO) == -1) {
+                close(null_fd);
+                _exit(EXIT_FAILURE);
+            }
+            close(null_fd);
+        }
+
         // The child no longer requires the file desc!
         for(size_t i = 0; i < input_count; i++) {
             close(input_fds[i]);
@@ -1065,9 +1102,15 @@ static bool execute_external(Token *tokens, bool background) {
     }
     if(!background) {
         int status;
-        if(waitpid(child, &status, 0) == -1) {
-            perror("waitpid");
+        foreground_running = 1;
+        while(waitpid(child, &status, 0) == -1) {
+            if(errno == EINTR) {
+                continue;
+            }
+            break;
         }
+        foreground_running = 0;
+        print_completed_background_jobs();
     }
     
     free(argv);
@@ -1081,7 +1124,7 @@ bool execute_command(Token *tokens, bool background) {
     Token *current = tokens;
     while(current != NULL) {
         if(current->type == TOKEN_PIPE) {
-            return execute_pipeline(tokens);
+            return execute_pipeline(tokens, background);
         }
         if(current->type == TOKEN_SEMI || current->type == TOKEN_AMP) {
             break;
