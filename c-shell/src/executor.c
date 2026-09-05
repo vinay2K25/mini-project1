@@ -989,7 +989,7 @@ static bool execute_pipeline(Token *tokens, bool background) {
         for(size_t i = 0; i < command_count; i++) {
             if(children[i] != -1) {
                 int status;
-                while(waitpid(children[i], &status, 0) == -1) {
+                while(waitpid(children[i], &status, WUNTRACED) == -1) {
                     if(errno == EINTR) {
                         continue;
                     }
@@ -998,7 +998,7 @@ static bool execute_pipeline(Token *tokens, bool background) {
             }
             if(output_writers[i] != -1) {
                 int status;
-                while(waitpid(output_writers[i], &status, 0) == -1) {
+                while(waitpid(output_writers[i], &status, WUNTRACED) == -1) {
                     if(errno == EINTR) {
                         continue;
                     }
@@ -1254,7 +1254,7 @@ static bool execute_external(Token *tokens, bool background) {
         if(tcsetpgrp(shell_terminal, child) == -1) {
             perror("tcsetpgrp");
         }
-        while(waitpid(child, &status, 0) == -1) {
+        while(waitpid(child, &status, WUNTRACED) == -1) {
             if(errno == EINTR) {
                 continue;
             }
