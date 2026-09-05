@@ -347,69 +347,6 @@ static bool copy_file_to_pipe(int input_fd, int pipe_fd) {
     }
 }
 
-// Re-directing stdin!
-// static bool redirect_input(int *input_fds, size_t input_count) {
-//     if(input_count == 0) {
-//         return true;
-//     }
-//     int input_pipe[2];
-//     if(pipe(input_pipe) == -1) {
-//         perror("pipe");
-//         return false;
-//     }
-//     pid_t writer = fork();
-//     if(writer == -1) {
-//         perror("fork");
-//         close(input_pipe[0]);
-//         close(input_pipe[1]);
-//         return false;
-//     }
-//     if(writer == 0) {
-//         // This child only writes the concat input!
-//         close(input_pipe[0]);
-//         for(size_t i = 0; i < input_count; i++) {
-//             if(!copy_file_to_pipe(input_fds[i], input_pipe[1])) {
-//                 close(input_pipe[1]);
-//                 for(size_t j = 0; j < input_count; j++) {
-//                     close(input_fds[j]);
-//                 }
-//                 _exit(EXIT_FAILURE);
-//             }
-//         }
-//         close(input_pipe[1]);
-//         for(size_t i = 0; i < input_count; i++) {
-//             close(input_fds[i]);
-//         }
-//         _exit(EXIT_SUCCESS);
-//     }
-//     // The process that called redirect_input() needs to have the read end as its stdin!
-//     close(input_pipe[1]);
-//     if(dup2(input_pipe[0], STDIN_FILENO) == -1) {
-//         perror("dup2");
-//         close(input_pipe[0]);
-//         return false;
-//     }
-//     close(input_pipe[0]);
-//     for(size_t i = 0; i < input_count; i++) {
-//         close(input_fds[i]);
-//     }
-//     // The writer terminates alone once all input has been copied!
-//     waitpid(writer, NULL, 0);
-//     return true;
-// }
-
-// Creating the input pipe!
-// static bool create_input_pipe(int *input_fds, size_t input_count, int input_pipe[2]) {
-//     if(pipe(input_pipe) == -1) {
-//         perror("pipe");
-//         return false;
-//     }
-//     // Again, since we've used -Werror flag, we'll get the unused var warning - this avoids them!
-//     (void)input_fds;
-//     (void)input_count;
-//     return true;
-// }
-
 // Helper func to count the num of output redir!
 static size_t count_output_redirections(Token *tokens) {
     size_t count = 0;
@@ -513,20 +450,6 @@ static Token *get_pipeline_stage(Token *tokens, size_t stage_number) {
     }
     return current;
 }
-
-// Cnt the num of tokens belonging to each stage!
-// static size_t count_pipeline_stage_tokens(Token *stage) {
-//     size_t count = 0;
-//     Token *current = stage;
-//     while(current != NULL) {
-//         if(current->type == TOKEN_PIPE || current->type == TOKEN_SEMI || current->type == TOKEN_AMP) {
-//             break;
-//         }
-//         count++;
-//         current = current->next;
-//     }
-//     return count;
-// }
 
 // Exec the pipeline of ext cmd!
 static bool execute_pipeline(Token *tokens, bool background) {
@@ -859,22 +782,6 @@ static bool execute_pipeline(Token *tokens, bool background) {
             }
         }
     }
-
-    // Wait for every successfully creat child!
-    // for(size_t i = 0; i < command_count; i++) {
-    //     if(children[i] != -1) {
-    //         int status;
-    //         if(waitpid(children[i], &status, 0) == -1) {
-    //             perror("waitpid");                
-    //         }
-    //     }
-    //     if(output_writers[i] != -1) {
-    //         int status;
-    //         if(waitpid(output_writers[i], &status, 0) == -1) {
-    //             perror("waitpid");
-    //         }
-    //     }
-    // }
     if(!background) {
         foreground_running = 1;
         for(size_t i = 0; i < command_count; i++) {
