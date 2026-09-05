@@ -16,6 +16,7 @@
 static void build_command_string(Token *tokens, char *buffer, size_t buffer_size);
 typedef struct {
     pid_t pid;
+    pid_t pgid;
     unsigned long job_number;
     char command[4096];
     bool active;
@@ -41,27 +42,6 @@ static void unblock_sigchld(const sigset_t *old_mask) {
         perror("sigprocmask");
     }
 }
-
-// Maintain a small array of processes launched in the background!
-// static pid_t background_pids[MAX_BACKGROUND_PROCESSES];
-// static size_t background_count = 0;
-
-// Helper functions for background processes!
-// static bool is_background_pid(pid_t pid) {
-//     for(size_t i = 0; i < background_count; i++) {
-//         if(background_pids[i] == pid) {
-//             return true;
-//         }
-//     }
-//     return false;
-// }
-
-// static void add_background_pid(pid_t pid) {
-//     if(background_count < MAX_BACKGROUND_PROCESSES) {
-//         background_pids[background_count] = pid;
-//         background_count++;
-//     }
-// }
 
 // SIGCHLD handler!
 static void handle_sigchld(int signal) {
@@ -108,13 +88,14 @@ static int find_free_job_slot() {
     return -1;
 }
 
-static bool add_background_job(pid_t pid, const char *command) {
+static bool add_background_job(pid_t pid, pid_t pgid, const char *command) {
     int slot = find_free_job_slot();
     if(slot == -1) {
         fprintf(stderr, "cshell: too many background jobs\n");
         return false;
     }
     background_jobs[slot].pid = pid;
+    background_jobs[slot].pgid = pgid;
     background_jobs[slot].job_number = next_job_number++;
     background_jobs[slot].active = true;
     background_jobs[slot].completed = false;
@@ -869,7 +850,7 @@ static bool execute_pipeline(Token *tokens, bool background) {
         char command_string[4096];
         build_command_string(tokens, command_string, sizeof(command_string));
         if(children[0] != -1) {
-            if(!add_background_job(children[0], command_string)) {
+            if(!add_background_job(children[0], children[0], command_string)) {
                 for(size_t i = 0; i < command_count; i++) {
                     if(children[i] != -1) {
                         kill(children[i], SIGTERM);
@@ -963,26 +944,6 @@ static bool execute_external(Token *tokens, bool background) {
     char command_string[4096];
     build_command_string(tokens, command_string, sizeof(command_string));
 
-    // Background execution handling!
-    // if(background) {
-    //     pid_t child = fork();
-    //     if(child < 0) {
-    //         perror("fork");
-    //         free(argv);
-    //         return false;
-    //     }
-    //     if(child == 0) {
-    //         execv(resolved_path, argv);
-    //         perror("exec");
-    //         _exit(EXIT_FAILURE);
-    //     }
-    //     if(!add_background_job(child, command_string)) {
-    //         waitpid(child, NULL, 0);
-    //     }
-    //     free(argv);
-    //     return true;
-    // }
-
     // Input redir!
     int *input_fds = NULL;
     size_t input_count = 0;
@@ -1065,6 +1026,11 @@ static bool execute_external(Token *tokens, bool background) {
         return false;
     }
     if(child == 0) {
+        if(setpgid(0, 0) == -1) {
+            perror("setpgid");
+            _exit(EXIT_FAILURE);
+        }
+
         if(background) {
             unblock_sigchld(&old_mask);
         }
@@ -1113,6 +1079,12 @@ static bool execute_external(Token *tokens, bool background) {
         perror("exec");
         _exit(EXIT_FAILURE);
     }
+
+    // Parent code!
+    if(setpgid(child, child) == -1) {
+        perror("setpgid");
+    }
+
     // Parent waits for the child to complete exec!
     if(input_count > 0) {
         close(input_pipe[0]);
@@ -1156,7 +1128,7 @@ static bool execute_external(Token *tokens, bool background) {
         free(output_fds);
     }
     if(background) {
-        if(!add_background_job(child, command_string)) {
+        if(!add_background_job(child, child, command_string)) {
             kill(child, SIGTERM);
         }
         unblock_sigchld(&old_mask);
