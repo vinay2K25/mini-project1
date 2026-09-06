@@ -1140,8 +1140,8 @@ static const char *spy_file_type(const char *path) {
 static void spy_print_special(pid_t pid, const char *fd_name, const char *proc_name) {
     char link_path[PATH_MAX];
     char target[PATH_MAX];
-    int written = snprintf(link_path, sizeof(link_path), "proc/%ld/%s", (long)pid, proc_name);
-    if(written < 0 || (size_t)written >= (sizeof)link_path) {
+    int written = snprintf(link_path, sizeof(link_path), "/proc/%ld/%s", (long)pid, proc_name);
+    if(written < 0 || (size_t)written >= sizeof(link_path)) {
         return;
     }
     if(!read_proc_link(link_path, target, sizeof(target))) {
@@ -1206,6 +1206,54 @@ static void spy_print_fds(pid_t pid) {
     closedir(directory);
 }
 
+// Execute the spy built-in!
+static void execute_spy(Token *tokens) {
+    Token *current = tokens->next;
+    if(current != NULL && current->next != NULL) {
+        printf("spy: invalid syntax\n");
+        return;
+    }
+    pid_t pid;
+    if(current == NULL) {
+        pid = getpid();
+    }
+    else {
+        if(current->type != TOKEN_WORD || current->value[0] == '\0') {
+            printf("spy: no such process\n");
+            return;
+        }
+        for(size_t i = 0; current->value[i] != '\0'; i++) {
+            if(!isdigit((unsigned char)current->value[i])) {
+                printf("spy: no such process\n");
+                return;
+            }
+        }
+        errno = 0;
+        char *end;
+        long pid_value = strtol(current->value, &end, 10);
+        if(errno == ERANGE || *end != '\0' || pid_value <= 0 || pid_value > INT_MAX) {
+            printf("spy: no such process\n");
+            return;
+        }
+        pid = (pid_t)pid_value;
+    }
+    char process_directory[PATH_MAX];
+    int written = snprintf(process_directory, sizeof(process_directory), "/proc/%ld", (long)pid);
+    if(written < 0 || (size_t)written >= sizeof(process_directory)) {
+        printf("spy: no such process\n");
+        return;
+    }
+    struct stat information;
+    if(stat(process_directory, &information) == -1 || !S_ISDIR(information.st_mode)) {
+        printf("spy: no such process\n");
+        return;
+    }
+    printf("%-6s %-5s %-7s %s\n", "PID", "FD", "TYPE", "PATH");
+    spy_print_special(pid, "cwd", "cwd");
+    spy_print_special(pid, "txt", "exe");
+    spy_print_fds(pid);
+}
+
 // Func to check if the cmd is a built-in cmd or not!
 bool is_builtin_command(Token *tokens) {
     if(tokens == NULL || tokens->type != TOKEN_WORD) {        
@@ -1230,6 +1278,9 @@ bool is_builtin_command(Token *tokens) {
         return true;
     }
     if(strcmp(tokens->value, "ping") == 0) {
+        return true;
+    }
+    if(strcmp(tokens->value, "spy") == 0) {
         return true;
     }
     return false;
@@ -1266,6 +1317,10 @@ bool execute_builtin(Token *tokens) {
     }
     if(strcmp(tokens->value, "ping") == 0) {
         execute_ping(tokens);
+        return true;
+    }
+    if(strcmp(tokens->value, "spy") == 0) {
+        execute_spy(tokens);
         return true;
     }
     return false;
