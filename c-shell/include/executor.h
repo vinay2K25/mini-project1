@@ -9,5 +9,6 @@ void print_completed_background_jobs(void);
 void print_activities(void);
 bool has_stopped_jobs(void);
 void shutdown_executor(void);
+bool ping_target(const char *target, int signal_number);
 
 #endif

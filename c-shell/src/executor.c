@@ -522,6 +522,48 @@ void resume_job(Token *tokens) {
     }
 }
 
+bool ping_target(const char *target, int signal_number) {
+    process_sigchld();
+    if(target[0] == '%') {
+        unsigned long job_number;
+        if(!parse_job_number(target + 1, &job_number)) {
+            return false;
+        }
+        BackgroundJob *job = find_job(job_number);
+        if(job == NULL || !job->active || job->completed) {
+            return false;
+        }
+        if(kill(-job->pgid, signal_number) == -1) {
+            return false;
+        }
+        return true;
+    }
+    char *end;
+    errno = 0;
+    long pid_value = strtol(target, &end, 10);
+    if(errno != 0 || *target == '\0' || *end != '\0' || pid_value <= 0 || pid_value > INT_MAX) {
+        return false;
+    }
+    pid_t target_pid = (pid_t)pid_value;
+    for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
+        if(!background_jobs[i].active) {
+            continue;
+        }
+        if(background_jobs[i].completed) {
+            continue;
+        }
+        for(size_t j = 0; j < background_jobs[i].process_count; j++) {
+            if(background_jobs[i].pids[j] == target_pid) {
+                if(kill(target_pid, signal_number) == -1) {
+                    return false;
+                }
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 void print_activities() {
     process_sigchld();
     for(unsigned long number = 1; number < next_job_number; number++) {
