@@ -1096,7 +1096,7 @@ static void execute_ping(Token *tokens) {
         printf("ping: no such process found\n");
         return;
     }
-    printf("Send signal %llu to %s\n", signal_value, target);
+    printf("Sent signal %llu to %s\n", signal_value, target);
 }
 
 // Func to check if the cmd is a built-in cmd or not!

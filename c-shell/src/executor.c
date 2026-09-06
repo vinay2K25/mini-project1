@@ -660,7 +660,7 @@ void initialise_executor(void) {
     struct sigaction sa;
     sa.sa_handler = handle_sigchld;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
+    sa.sa_flags = SA_RESTART;
     if(sigaction(SIGCHLD, &sa, NULL) == -1) {
         perror("sigaction");
         exit(EXIT_FAILURE);
