@@ -1152,6 +1152,65 @@ static void spy_print_special(pid_t pid, const char *fd_name, const char *proc_n
     printf("%-6ld %-5s %-7s %s\n", (long)pid, fd_name, type, target);
 }
 
+// Check whether a memory mapped file has already been printed!
+static bool spy_mem_seen(char **paths, size_t count, const char *path) {
+    for(size_t i = 0; i < count; i++) {
+        if(strcmp(paths[i], path) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Print unique memory-mapped files from /proc/<pid>/maps!
+static void spy_print_mem(pid_t pid) {
+    char maps_path[PATH_MAX];
+    int written = snprintf(maps_path, sizeof(maps_path), "/proc/%ld/maps", (long)pid);
+    if(written < 0 || (size_t)written >= sizeof(maps_path)) {
+        return;
+    }
+    FILE *file = fopen(maps_path, "r");
+    if(file == NULL) {
+        return;
+    }
+    char **seen_paths = NULL;
+    size_t seen_count = 0;
+    char line[PATH_MAX + 512];
+    while(fgets(line, sizeof(line), file) != NULL) {
+        char *pathname = strchr(line, '/');
+        if(pathname == NULL) {
+            continue;
+        }
+        pathname[strcspn(pathname, "\n")] = '\0';
+        if(pathname[0] == '\0') {
+            continue;
+        }
+        if(spy_mem_seen(seen_paths, seen_count, pathname)) {
+            continue;
+        }
+        char *saved_path = malloc(strlen(pathname) + 1);
+        if(saved_path == NULL) {
+            break;
+        }
+        strcpy(saved_path, pathname);
+        char **new_paths = realloc(seen_paths, (seen_count + 1) * sizeof(char *));
+        if(new_paths == NULL) {
+            free(saved_path);
+            return;
+        }
+        seen_paths = new_paths;
+        seen_paths[seen_count] = saved_path;
+        seen_count++;
+        const char *type = spy_file_type(pathname);
+        printf("%-6ld %-5s %-7s %s\n", (long)pid, "mem", type, pathname);
+    }
+    for(size_t i = 0; i < seen_count; i++) {
+        free(seen_paths[i]);
+    }
+    free(seen_paths);
+    fclose(file);
+}
+
 // Print all numeric file desc from /proc/<pid>/fd!
 static void spy_print_fds(pid_t pid) {
     char fd_directory[PATH_MAX];
@@ -1251,6 +1310,7 @@ static void execute_spy(Token *tokens) {
     printf("%-6s %-5s %-7s %s\n", "PID", "FD", "TYPE", "PATH");
     spy_print_special(pid, "cwd", "cwd");
     spy_print_special(pid, "txt", "exe");
+    spy_print_mem(pid);
     spy_print_fds(pid);
 }
 
