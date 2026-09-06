@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <ctype.h>
 #include "snoop.h"
+extern char **environ;
 
 static bool is_executable_file(const char *path) {
     struct stat information;
@@ -203,4 +204,74 @@ static bool snoop_command_mode(Token *tokens) {
     }
     free(argv);
     return true;
+}
+
+static bool snoop_pid_mode(pid_t pid) {
+    if(ptrace(PTRACE_ATTACH, pid, NULL, NULL) == -1) {
+        printf("snoop: no such process\n");
+        return true;
+    }
+    int status;
+    while(waitpid(pid, &status, 0) == -1) {
+        if(errno == EINTR) {
+            continue;
+        }
+        ptrace(PTRACE_DETACH, pid, NULL, NULL);
+        return false;
+    }
+    if(!WIFSTOPPED(status)) {
+        ptrace(PTRACE_DETACH, pid, NULL, NULL);
+        return false;
+    }
+    if(ptrace(PTRACE_SETOPTIONS, pid, NULL, PTRACE_O_TRACESYSGOOD) == -1) {
+        ptrace(PTRACE_DETACH, pid, NULL, NULL);
+        return false;
+    }
+    if(ptrace(PTRACE_SYSCALL, pid, NULL, NULL) == -1) {
+        ptrace(PTRACE_DETACH, pid, NULL, NULL);
+        return false;
+    }
+    while(waitpid(pid, &status, 0) == -1) {
+        if(errno == EINTR) {
+            continue;
+        }
+        break;
+    }
+    if(WIFSTOPPED(status)) {
+        ptrace(PTRACE_DETACH, pid, NULL, NULL);
+    }
+    return true;
+}
+
+bool execute_snoop(Token *tokens) {
+    if(tokens == NULL || tokens->type != TOKEN_WORD || strcmp(tokens->value, "snoop") != 0) {
+        return false;
+    }
+    Token *current = tokens->next;
+    if(current == NULL) {
+        printf("snoop: invalid syntax\n");
+        return true;
+    }
+    if(strcmp(current->value, "-p") == 0) {
+        current = current->next;
+        if(current == NULL || current->type != TOKEN_WORD || current->next != NULL) {
+            printf("snoop: invalid syntax\n");
+            return true;
+        }
+        pid_t pid;
+        if(!parse_pid(current->value, &pid)) {
+            printf("snoop: no such process\n");
+            return true;
+        }
+        return snoop_command_mode(pid);
+    }
+    current = tokens->next;
+    while(current != NULL) {
+        if(current->type != TOKEN_WORD) {
+            printf("snoop: invalid syntax\n");
+            return true;
+        }
+        current = current->next;
+    }
+    return snoop_command_mode(tokens);
 }

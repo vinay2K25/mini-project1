@@ -12,6 +12,7 @@
 #include <sys/wait.h>
 #include "executor.h"
 #include <ctype.h>
+#include "snoop.h"
 
 // PATH_MAX
 // File to store the frecencies of the directories!
