@@ -90,3 +90,117 @@ static bool resolve_snoop_command(const char *command, char *resolved_path, size
     free(path_copy);
     return false;
 }
+
+static size_t count_arguments(Token *tokens) {
+    size_t count = 0;
+    Token *current = tokens;
+    while(current != NULL) {
+        if(current->type != TOKEN_WORD) {
+            break;
+        }
+        count++;
+        current = current->next;
+    }
+    return count;
+}
+
+static char **build_snoop_argv(Token *tokens) {
+    size_t argument_count = count_arguments(tokens);
+    char **argv = malloc((argument_count + 1) * sizeof(char *));
+    if(argv == NULL) {
+        return NULL;
+    }
+    Token *current = tokens;
+    for(size_t i = 0; i < argument_count; i++) {
+        argv[i] = current->value;
+        current = current->next;
+    }
+    argv[argument_count] = NULL;
+    return argv;
+}
+
+static bool parse_pid(const char *text, pid_t *pid) {
+    if(text == NULL || text[0] == '\0') {
+        return false;
+    }
+    for(size_t i = 0; text[i] != '\0'; i++) {
+        if(!isdigit((unsigned char)text[i])) {
+            return false;
+        }
+    }
+    errno = 0;
+    char *end;
+    unsigned long long value = strtoull(text, &end, 10);
+    if(errno == ERANGE || *end != '\0' || value == 0 || value > INT_MAX) {
+        return false;
+    }
+    *pid = (pid_t)value;
+    return true;
+}
+
+static bool snoop_command_mode(Token *tokens) {
+    char resolved_path[PATH_MAX];
+    if(!resolve_snoop_command(tokens->next->value, resolved_path, sizeof(resolved_path))) {
+        printf("snoop: command not found\n");
+        return true;
+    }
+    char **argv = build_snoop_argv(tokens->next);
+    if(argv == NULL) {
+        return false;
+    }
+    pid_t child = fork();
+    if(child == -1) {
+        perror("fork");
+        free(argv);
+        return false;
+    }
+    if(child == 0) {
+        if(ptrace(PTRACE_TRACEME, 0, NULL, NULL) == -1) {
+            _exit(EXIT_FAILURE);
+        }
+        if(raise(SIGSTOP) != 0) {
+            _exit(EXIT_FAILURE);
+        }
+        execve(resolved_path, argv, environ);
+        _exit(EXIT_FAILURE);
+    }
+    int status;
+    while(waitpid(child, &status, 0) == -1) {
+        if(errno == EINTR) {
+            continue;
+        }
+        free(argv);
+        return false;
+    }
+    if(!WIFSTOPPED(status)) {
+        free(argv);
+        return false;
+    }
+    if(ptrace(PTRACE_SETOPTIONS, child, NULL, PTRACE_O_TRACESYSGOOD) == -1) {
+        perror("ptrace");
+        free(argv);
+        return false;
+    }
+    if(ptrace(PTRACE_SYSCALL, child, NULL, NULL) == -1) {
+        perror("ptrace");
+        free(argv);
+        return false;
+    }
+    while(waitpid(child, &status, 0) == -1) {
+        if(errno == EINTR) {
+            continue;
+        }
+        break;
+    }
+    if(WIFSTOPPED(status)) {
+        ptrace(PTRACE_SYSCALL, child, NULL, NULL);
+    }
+    while(waitpid(child, &status, 0) == -1) {
+        if(errno == EINTR) {
+            continue;
+        }
+        break;
+    }
+    free(argv);
+    return true;
+}
