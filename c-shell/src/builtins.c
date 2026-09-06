@@ -1099,6 +1099,113 @@ static void execute_ping(Token *tokens) {
     printf("Sent signal %llu to %s\n", signal_value, target);
 }
 
+// Read the target of a symbolic link and store it in result!
+static bool read_proc_link(const char *link_path, char *result, size_t size) {
+    ssize_t length = readlink(link_path, result, size - 1);
+    if(length == -1) {
+        return false;
+    }
+    result[length] = '\0';
+    return true;
+}
+
+// Convert a file's stat information into the TYPE expected by spy!
+static const char *spy_file_type(const char *path) {
+    struct stat information;
+    if(stat(path, &information) == -1) {
+        return "UNKNOWN";
+    }
+    if(S_ISREG(information.st_mode)) {
+        return "REG";
+    }
+    if(S_ISDIR(information.st_mode)) {
+        return "DIR";
+    }
+    if(S_ISCHR(information.st_mode)) {
+        return "CHR";
+    }
+    if(S_ISBLK(information.st_mode)) {
+        return "BLK";
+    }
+    if(S_ISFIFO(information.st_mode)) {
+        return "FIFO";
+    }
+    if(S_ISSOCK(information.st_mode)) {
+        return "SOCK";
+    }
+    return "UNKWOWN";
+}
+
+// Print one special /proc entry such as cwd or txt!
+static void spy_print_special(pid_t pid, const char *fd_name, const char *proc_name) {
+    char link_path[PATH_MAX];
+    char target[PATH_MAX];
+    int written = snprintf(link_path, sizeof(link_path), "proc/%ld/%s", (long)pid, proc_name);
+    if(written < 0 || (size_t)written >= (sizeof)link_path) {
+        return;
+    }
+    if(!read_proc_link(link_path, target, sizeof(target))) {
+        return;
+    }
+    // cwd and txt are both links to file-system objects!
+    const char *type = spy_file_type(target);
+    printf("%-6ld %-5s %-7s %s\n", (long)pid, fd_name, type, target);
+}
+
+// Print all numeric file desc from /proc/<pid>/fd!
+static void spy_print_fds(pid_t pid) {
+    char fd_directory[PATH_MAX];
+    int written = snprintf(fd_directory, sizeof(fd_directory), "/proc/%ld/fd", (long)pid);
+    if(written < 0 || (size_t)written >= sizeof(fd_directory)) {
+        return;
+    }
+    DIR *directory = opendir(fd_directory);
+    if(directory == NULL) {
+        return;
+    }
+    int directory_fd = dirfd(directory);
+    struct dirent *entry;
+    while((entry = readdir(directory)) != NULL) {
+        // Only numeric directory entries represent file desc!
+        if(entry->d_name[0] == '\0') {
+            continue;
+        }
+        bool numeric = true;
+        for(size_t i = 0; entry->d_name[i] != '\0'; i++) {
+            if(!isdigit((unsigned char)entry->d_name[i])) {
+                numeric = false;
+                break;
+            }
+        }
+        if(!numeric) {
+            continue;
+        }
+        errno = 0;
+        char *end;
+        long fd_number = strtol(entry->d_name, &end, 10);
+        if(errno == ERANGE || *end != '\0' || fd_number < 0) {
+            continue;
+        }
+        // Ignore the directory fd created by opendir itself!
+        if(fd_number == directory_fd) {
+            continue;
+        }
+        char link_path[PATH_MAX];
+        char target[PATH_MAX];
+        written = snprintf(link_path, sizeof(link_path), "%s/%s", fd_directory, entry->d_name);
+        if(written < 0 || (size_t)written >= sizeof(link_path)) {
+            continue;
+        }
+        if(!read_proc_link(link_path, target, sizeof(target))) {
+            // The fd may have disappeared while spy was examining it!
+            continue;
+        }
+        const char *type = spy_file_type(link_path);
+        printf("%-6ld %-5s %-7s %s\n", (long)pid, entry->d_name, type, target);
+    }
+    closedir(directory);
+}
+
 // Func to check if the cmd is a built-in cmd or not!
 bool is_builtin_command(Token *tokens) {
     if(tokens == NULL || tokens->type != TOKEN_WORD) {        
