@@ -1344,6 +1344,9 @@ bool is_builtin_command(Token *tokens) {
     if(strcmp(tokens->value, "spy") == 0) {
         return true;
     }
+    if(strcmp(tokens->value, "snoop") == 0) {
+        return true;
+    }
     return false;
 }
 
@@ -1382,6 +1385,10 @@ bool execute_builtin(Token *tokens) {
     }
     if(strcmp(tokens->value, "spy") == 0) {
         execute_spy(tokens);
+        return true;
+    }
+    if(strcmp(tokens->value, "snoop") == 0) {
+        execute_snoop(tokens);
         return true;
     }
     return false;

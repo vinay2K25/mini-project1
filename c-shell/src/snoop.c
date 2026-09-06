@@ -263,7 +263,7 @@ bool execute_snoop(Token *tokens) {
             printf("snoop: no such process\n");
             return true;
         }
-        return snoop_command_mode(pid);
+        return snoop_pid_mode(pid);
     }
     current = tokens->next;
     while(current != NULL) {
