@@ -280,6 +280,7 @@ static void resume_foreground(BackgroundJob *job, unsigned int timeout, bool has
     printf("%s\n", job->command);
     struct sigaction old_alarm_action;
     struct sigaction alarm_action;
+    bool alarm_installed = false;
     if(has_timeout) {
         alarm_action.sa_handler = handle_resume_alarm;
         sigemptyset(&alarm_action.sa_mask);
@@ -290,17 +291,20 @@ static void resume_foreground(BackgroundJob *job, unsigned int timeout, bool has
         else {
             resume_timeout = 0;
             alarm(timeout);
+            alarm_installed = true;
         }
     }
     bool stopped = false;
     bool timed_out = false;
+    bool signaled = false;
     for(size_t i = 0; i < job->process_count; i++) {
         if(job->pids[i] == -1) {
             continue;
         }
         int status;
+        pid_t result;
         while(true) {
-            pid_t result = waitpid(job->pids[i], &status, WNOHANG);
+            result = waitpid(job->pids[i], &status, WUNTRACED);
             if(result == -1) {
                 if(errno == EINTR) {
                     if(resume_timeout) {
@@ -311,35 +315,54 @@ static void resume_foreground(BackgroundJob *job, unsigned int timeout, bool has
                 }
                 break;
             }
-            if(WIFSTOPPED(status)) {
-                job->pids[i] = -1;
-                break;
-            }
-            if(WIFSIGNALED(status)) {
-                job->normal = false;
-                job->pids[i] = -1;
-                break;
-            }
-        }
-        if(timed_out || stopped) {
             break;
+        }
+        if(timed_out) {
+            break;
+        }
+        if(result == -1) {
+            continue;
+        }
+        if(WIFSTOPPED(status)) {
+            stopped = true;
+            job->states[i] = PROCESS_STOPPED;
+        }
+        if(WIFEXITED(status)) {
+            job->pids[i] = -1;
+        }
+        if(WIFSIGNALED(status)) {
+            signaled = true;
+            job->normal = false;
+            job->pids[i] = -1;
         }
     }
     if(timed_out) {
-        kill(-job->pgid, SIGTERM);
+        if(kill(-job->pgid, SIGTERM) == -1) {
+            if(errno != ESRCH) {
+                perror("kill");
+            }
+        }
+        for(size_t i = 0; i < job->process_count; i++) {
+            if(job->pids[i] == -1) {
+                continue;
+            }
+            int status;
+            while(waitpid(job->pids[i], &status, 0) == -1) {
+                if(errno == EINTR) {
+                    continue;
+                }
+                break;
+            }
+            job->normal = false;
+            job->pids[i] = -1;
+        }
         printf("resume: job timed out\n");
+
     }
-    if(has_timeout) {
+    if(alarm_installed) {
         alarm(0);
         if(sigaction(SIGALRM, &old_alarm_action, NULL) == -1) {
             perror("sigaction");
-        }
-    }
-    if(stopped) {
-        for(size_t i = 0; i < job->process_count; i++) {
-            if(job->pids[i] != -1) {
-                job->states[i] = PROCESS_STOPPED;
-            }
         }
     }
     bool all_exited = true;
@@ -356,12 +379,26 @@ static void resume_foreground(BackgroundJob *job, unsigned int timeout, bool has
         perror("tcsetpgrp");
     }
     foreground_running = 0;
-    if(stopped) {
+    if(signaled && !timed_out) {
+        printf("\n");
+    }
+    if(stopped && !timed_out) {
         printf("\n");
         printf("[%lu] + Stopped %s\n", job->job_number, job->command);
     }
     if(job->completed) {
-        print_completed_background_jobs();
+        for(size_t i = 0; i < job->process_count; i++) {
+            free(job->commands[i]);
+        }
+        free(job->commands);
+        free(job->pids);
+        free(job->states);
+        job->commands = NULL;
+        job->pids = NULL;
+        job->states = NULL;
+        job->process_count = 0;
+        job->active = false;
+        job->completed = false;
     }
 }
 
