@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include "executor.h"
+#include <ctype.h>
 
 // PATH_MAX
 // File to store the frecencies of the directories!
@@ -1055,6 +1056,49 @@ static void execute_locate(Token *tokens) {
     }
 }
 
+static void execute_ping(Token *tokens) {
+    Token *current = tokens->next;
+    if(current == NULL || current->type != TOKEN_WORD) {
+        printf("ping: invalid syntax\n");
+        return;
+    }
+    const char *target = current->value;
+    current = current->next;
+    if(current == NULL || current->type != TOKEN_WORD) {
+        printf("ping: invalid syntax\n");
+        return;
+    }
+    const char *signal_string = current->value;
+    current = current->next;
+    if(current != NULL) {
+        printf("ping: invalid syntax\n");
+        return;
+    }
+    if(signal_string[0] == '\0') {
+        printf("ping: invalid syntax\n");
+        return;
+    }
+    for(size_t i = 0; signal_string[i] != '\0'; i++) {
+        if(!isdigit((unsigned char)signal_string[i])) {
+            printf("ping: invalid syntax\n");
+            return;
+        }
+    }
+    errno = 0;
+    char *end;
+    unsigned long long signal_value = strtoull(signal_string, &end, 10);
+    if(errno == ERANGE || *end != '\0' || signal_value > ULLONG_MAX) {
+        printf("ping: invalid syntax\n");
+        return;
+    }
+    int actual_signal = (int)(signal_value % 64);
+    if(!ping_target(target, actual_signal)) {
+        printf("ping: no such process found\n");
+        return;
+    }
+    printf("Send signal %llu to %s\n", signal_value, target);
+}
+
 // Func to check if the cmd is a built-in cmd or not!
 bool is_builtin_command(Token *tokens) {
     if(tokens == NULL || tokens->type != TOKEN_WORD) {        
@@ -1076,6 +1120,9 @@ bool is_builtin_command(Token *tokens) {
         return true;
     }
     if(strcmp(tokens->value, "resume") == 0) {
+        return true;
+    }
+    if(strcmp(tokens->value, "ping") == 0) {
         return true;
     }
     return false;
@@ -1108,6 +1155,10 @@ bool execute_builtin(Token *tokens) {
     }
     if(strcmp(tokens->value, "resume") == 0) {
         resume_job(tokens);
+        return true;
+    }
+    if(strcmp(tokens->value, "ping") == 0) {
+        execute_ping(tokens);
         return true;
     }
     return false;

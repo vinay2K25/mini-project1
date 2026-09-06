@@ -526,7 +526,7 @@ bool ping_target(const char *target, int signal_number) {
     process_sigchld();
     if(target[0] == '%') {
         unsigned long job_number;
-        if(!parse_job_number(target + 1, &job_number)) {
+        if(!parse_job_number(target, &job_number)) {
             return false;
         }
         BackgroundJob *job = find_job(job_number);
