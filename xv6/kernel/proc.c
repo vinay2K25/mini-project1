@@ -125,6 +125,13 @@ found:
   p->pid = allocpid();
   p->state = USED;
 
+#ifdef SCHEDULER_MLFQ
+  // Every new process starts from queue 0, that is, the highest priority queue!
+  p->queue = 0;
+  p->slice_ticks = 0;
+  p->ticks_since_boost = 0;
+#endif
+
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0) {
     freeproc(p);
@@ -167,6 +174,12 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
+#ifdef SCHEDULER_MLFQ
+  // Every new process starts from queue 0, that is, the highest priority queue!
+  p->queue = 0;
+  p->slice_ticks = 0;
+  p->ticks_since_boost = 0;
+#endif
   p->state = UNUSED;
 }
 

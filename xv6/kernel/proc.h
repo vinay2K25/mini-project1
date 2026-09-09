@@ -89,6 +89,13 @@ struct proc {
   int xstate;           // Exit status to be returned to parent's wait
   int pid;              // Process ID
 
+#ifdef SCHEDULER_MLFQ
+  // MLFQ bookeeping!
+  int queue; // Current queue, 0 has the highest priority and 3 has the lowest priority!
+  int slice_ticks; // Ticks consumed in the current queue's time slice!
+  int ticks_since_boost; // Ticks since the last priority boost, that is, all processes in the lower queues get boosted to the top-most queue!
+#endif
+
   // wait_lock must be held when using this:
   struct proc *parent; // Parent process
 
