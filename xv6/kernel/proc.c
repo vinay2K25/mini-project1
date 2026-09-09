@@ -18,6 +18,12 @@ struct spinlock pid_lock;
 extern void forkret(void);
 static void freeproc(struct proc *p);
 
+#ifdef SCHEDULER_MLFQ
+// Forward declaration because MLFQ queue insertion is used
+// before its full definition later in this file.
+static void mlfq_enqueue(struct proc *p);
+#endif
+
 extern char trampoline[]; // trampoline.S
 
 // helps ensure that wakeups of wait()ing
@@ -25,6 +31,15 @@ extern char trampoline[]; // trampoline.S
 // memory model when using p->parent.
 // must be acquired before any p->lock.
 struct spinlock wait_lock;
+
+#ifdef SCHEDULER_MLFQ
+// Monotonically increasing sequence number used to determine the order
+// in which runnable processes entered their MLFQ queue.
+uint64 mlfq_next_seq = 0;
+
+// Protects mlfq_next_seq when multiple CPUs enqueue processes at once.
+struct spinlock mlfq_seq_lock;
+#endif
 
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
@@ -51,6 +66,11 @@ procinit(void)
 
   initlock(&pid_lock, "nextpid");
   initlock(&wait_lock, "wait_lock");
+
+#ifdef SCHEDULER_MLFQ
+  // Initialize the lock protecting the MLFQ enqueue sequence counter.
+  initlock(&mlfq_seq_lock, "mlfq_seq");
+#endif
   for (p = proc; p < &proc[NPROC]; p++) {
     initlock(&p->lock, "proc");
     p->state = UNUSED;
@@ -126,10 +146,11 @@ found:
   p->state = USED;
 
 #ifdef SCHEDULER_MLFQ
-  // Every new process starts from queue 0, that is, the highest priority queue!
+  // Every new process starts in Q0 with a fresh time slice!
   p->queue = 0;
   p->slice_ticks = 0;
   p->ticks_since_boost = 0;
+  p->enqueue_seq = 0;
 #endif
 
   // Allocate a trapframe page.
@@ -175,10 +196,11 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
 #ifdef SCHEDULER_MLFQ
-  // Every new process starts from queue 0, that is, the highest priority queue!
+  // Clear all MLFQ bookkeeping when the process is released!
   p->queue = 0;
   p->slice_ticks = 0;
   p->ticks_since_boost = 0;
+  p->enqueue_seq = 0;
 #endif
   p->state = UNUSED;
 }
@@ -237,8 +259,13 @@ userinit(void)
   initproc = p;
 
   p->cwd = namei("/");
-
+  
   p->state = RUNNABLE;
+
+#ifdef SCHEDULER_MLFQ
+  // The initial process enters Q0 at the tail of that queue.
+  mlfq_enqueue(p);
+#endif
 
   release(&p->lock);
 }
@@ -310,8 +337,12 @@ kfork(void)
   np->parent = p;
   release(&wait_lock);
 
-  acquire(&np->lock);
+    acquire(&np->lock);
   np->state = RUNNABLE;
+#ifdef SCHEDULER_MLFQ
+  // A newly created process enters the tail of Q0.
+  mlfq_enqueue(np);
+#endif
   release(&np->lock);
 
   return pid;
@@ -431,6 +462,23 @@ kwait(uint64 addr)
   }
 }
 
+#ifdef SCHEDULER_MLFQ
+// Place a process at the tail of its current MLFQ queue.
+//
+// The caller must already hold p->lock. The sequence counter itself
+// is protected because multiple CPUs may enqueue processes concurrently.
+static void
+mlfq_enqueue(struct proc *p)
+{
+  acquire(&mlfq_seq_lock);
+  p->enqueue_seq = ++mlfq_next_seq;
+  release(&mlfq_seq_lock);
+
+  // Re-entering the queue gives the process a fresh time slice.
+  p->slice_ticks = 0;
+}
+#endif
+
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
@@ -442,40 +490,62 @@ void
 scheduler(void)
 {
   struct proc *p;
+#ifdef SCHEDULER_MLFQ
+  struct proc *chosen;
+#endif
   struct cpu *c = mycpu();
-
   c->proc = 0;
   for (;;) {
-    // The most recent process to run may have had interrupts
-    // turned off; enable them to avoid a deadlock if all
-    // processes are waiting. Then turn them back off
-    // to avoid a possible race between an interrupt
-    // and wfi.
+    // Enable interrupts so this CPU can receive timer/device interrupts.
     intr_on();
     intr_off();
-
     int found = 0;
+#ifdef SCHEDULER_MLFQ
+    chosen = 0;
+    // Find the highest-priority non-empty queue.
+    // Within that queue, choose the process that has been waiting
+    // the longest (smallest enqueue sequence number).
+    for (int q = 0; q < 4 && chosen == 0; q++) {
+      for (p = proc; p < &proc[NPROC]; p++) {
+        acquire(&p->lock);
+        if (p->state == RUNNABLE && p->queue == q) {
+          if (chosen == 0 || p->enqueue_seq < chosen->enqueue_seq) {
+            if (chosen != 0)
+              release(&chosen->lock);
+
+            chosen = p;
+            continue;
+          }
+        }
+        release(&p->lock);
+      }
+    }
+    if (chosen != 0) {
+      // Run the selected process.
+      chosen->state = RUNNING;
+      c->proc = chosen;
+      swtch(&c->context, &chosen->context);
+      c->proc = 0;
+      // The process should have changed its state before returning here.
+      release(&chosen->lock);
+      found = 1;
+    }
+#else
+    // Original xv6 round-robin scheduler.
     for (p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if (p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
-
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
         c->proc = 0;
         found = 1;
       }
       release(&p->lock);
     }
-    if (found == 0) {
-      // nothing to run; stop running on this core until an interrupt.
+#endif
+  if (found == 0)
       asm volatile("wfi");
-    }
   }
 }
 
@@ -559,6 +629,13 @@ yield(void)
   struct proc *p = myproc();
   acquire(&p->lock);
   p->state = RUNNABLE;
+
+#ifdef SCHEDULER_MLFQ
+  // Voluntary yield keeps the process in the same queue but moves it
+  // to the tail of that queue with a fresh time slice.
+  mlfq_enqueue(p);
+#endif
+
   sched();
   release(&p->lock);
 }
@@ -643,9 +720,13 @@ wakeup(void *chan)
 
       // If this waiting process has gotten so far as to actually
       // go to sleep, also set it back to RUNNING.
-      if (p->state == SLEEPING) {
-        p->state = RUNNABLE;
-      }
+        if (p->state == SLEEPING) {
+          p->state = RUNNABLE;
+#ifdef SCHEDULER_MLFQ
+  // A waking process re-enters the tail of its current queue.
+  mlfq_enqueue(p);
+#endif
+        }
     }
     release(&p->lock);
   }
@@ -664,8 +745,11 @@ kkill(int pid)
     if (p->pid == pid) {
       p->killed = 1;
       if (p->state == SLEEPING) {
-        // Wake process from sleep().
         p->state = RUNNABLE;
+#ifdef SCHEDULER_MLFQ
+  // A waking process re-enters the tail of its current queue.
+  mlfq_enqueue(p);
+#endif
       }
       release(&p->lock);
       return 0;

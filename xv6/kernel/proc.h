@@ -90,10 +90,11 @@ struct proc {
   int pid;              // Process ID
 
 #ifdef SCHEDULER_MLFQ
-  // MLFQ bookeeping!
-  int queue; // Current queue, 0 has the highest priority and 3 has the lowest priority!
-  int slice_ticks; // Ticks consumed in the current queue's time slice!
-  int ticks_since_boost; // Ticks since the last priority boost, that is, all processes in the lower queues get boosted to the top-most queue!
+  // MLFQ bookkeeping.
+  int queue;             // Current queue: 0 is highest priority, 3 is lowest!
+  int slice_ticks;       // Ticks consumed in the current queue's time slice!
+  int ticks_since_boost; // Ticks since the last priority boost!
+  uint64 enqueue_seq;    // Sequence number used to maintain FIFO order within a queue!
 #endif
 
   // wait_lock must be held when using this:
