@@ -82,8 +82,15 @@ usertrap(void)
     kexit(-1);
 
   // give up the CPU if this is a timer interrupt.
+  // On a timer interrupt, MLFQ accounts for the CPU tick and yields only when the current process has exhausted its time-slice!
+  // Without MLFQ, preserve xv6's original round-robin behavior!
+  #ifdef SCHEDULER_MLFQ
+  if (which_dev == 2 && mlfq_tick())
+    yield();
+  #else
   if (which_dev == 2)
     yield();
+  #endif
 
   prepare_return();
 
@@ -154,8 +161,15 @@ kerneltrap()
   }
 
   // give up the CPU if this is a timer interrupt.
+  // On a timer interrupt, MLFQ accounts for the CPU tick and yields only when the current process has exhausted its time-slice!
+  // Without MLFQ, preserve xv6's original round-robin behavior!
+  #ifdef SCHEDULER_MLFQ
+  if (which_dev == 2 && myproc() != 0 && mlfq_tick())
+    yield();
+  #else
   if (which_dev == 2 && myproc() != 0)
     yield();
+  #endif
 
   // the yield() may have caused some traps to occur,
   // so restore trap registers for use by kernelvec.S's sepc instruction.

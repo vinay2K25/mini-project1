@@ -506,6 +506,52 @@ sched(void)
   mycpu()->intena = intena;
 }
 
+#ifdef SCHEDULER_MLFQ
+// Account for one timer tick of CPU time for the currently running process. If the process has exhausted its queue's time slice, demote it to the next lower-priority queue and request a yield!
+int
+mlfq_tick(void)
+{
+  struct proc *p = myproc();
+  int slice_expired = 0;
+
+  if (p == 0)
+    return 0;
+
+  acquire(&p->lock);
+
+  // One timer tick of CPU time has been consumed by this process!
+  p->slice_ticks++;
+
+  // Queue 0, 1, 2, and 3 have time slices of 1, 4, 8, and 16 ticks respectively!
+  int slice_limit;
+  if (p->queue == 0)
+    slice_limit = 1;
+  else if (p->queue == 1)
+    slice_limit = 4;
+  else if (p->queue == 2)
+    slice_limit = 8;
+  else
+    slice_limit = 16;
+
+  // The current time slice has been completely consumed!
+  if (p->slice_ticks >= slice_limit) {
+    // Move the process down one priority level!
+    // Q3 is already the lowest queue, so it remains in Q3!
+    if (p->queue < 3)
+      p->queue++;
+
+    // A new time slice starts when the process is scheduled again!
+    p->slice_ticks = 0;
+
+    slice_expired = 1;
+  }
+
+  release(&p->lock);
+
+  return slice_expired;
+}
+#endif
+
 // Give up the CPU for one scheduling round.
 void
 yield(void)
