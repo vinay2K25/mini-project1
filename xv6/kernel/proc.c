@@ -669,6 +669,9 @@ mlfq_tick(void)
   // One timer tick of CPU time has been consumed by this process!
   p->slice_ticks++;
 
+  // Track CPU ticks consumed since the last priority boost.
+  p->ticks_since_boost++;
+
   // Queue 0, 1, 2, and 3 have time slices of 1, 4, 8, and 16 ticks respectively!
   int slice_limit;
   if (p->queue == 0)
