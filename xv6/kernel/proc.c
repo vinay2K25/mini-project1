@@ -26,6 +26,16 @@ static void mlfq_enqueue(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
 
+#ifdef SCHEDULER_MLFQ
+// Forward declaration because MLFQ queue insertion is used
+// before its full definition later in this file.
+static void mlfq_enqueue(struct proc *p);
+
+// Return 1 if a runnable process exists in a higher-priority
+// queue than the supplied queue.
+static int mlfq_higher_priority_runnable(int queue);
+#endif
+
 // helps ensure that wakeups of wait()ing
 // parents are not lost. helps obey the
 // memory model when using p->parent.
@@ -577,6 +587,28 @@ sched(void)
 }
 
 #ifdef SCHEDULER_MLFQ
+// Check whether a runnable process exists in a higher-priority
+// queue than the current process.
+//
+// This function is called from the timer-tick path while the
+// current process may hold its own lock. Therefore, do not acquire
+// any process locks here; doing so could create a lock-order
+// deadlock with the scheduler.
+static int
+mlfq_higher_priority_runnable(int queue)
+{
+  struct proc *p;
+
+  for (p = proc; p < &proc[NPROC]; p++) {
+    if (p->state == RUNNABLE && p->queue < queue)
+      return 1;
+  }
+
+  return 0;
+}
+#endif
+
+#ifdef SCHEDULER_MLFQ
 // Account for one timer tick of CPU time for the currently running process. If the process has exhausted its queue's time slice, demote it to the next lower-priority queue and request a yield!
 int
 mlfq_tick(void)
@@ -603,7 +635,7 @@ mlfq_tick(void)
   else
     slice_limit = 16;
 
-  // The current time slice has been completely consumed!
+    // The current time slice has been completely consumed!
   if (p->slice_ticks >= slice_limit) {
     // Move the process down one priority level!
     // Q3 is already the lowest queue, so it remains in Q3!
@@ -613,6 +645,11 @@ mlfq_tick(void)
     // A new time slice starts when the process is scheduled again!
     p->slice_ticks = 0;
 
+    slice_expired = 1;
+  }
+  else if (mlfq_higher_priority_runnable(p->queue)) {
+    // A higher-priority process is runnable, so give it the CPU
+    // at the next scheduling point without changing our queue.
     slice_expired = 1;
   }
 
@@ -828,14 +865,32 @@ procdump(void)
   char *state;
 
   printk("\n");
+
+#ifdef SCHEDULER_MLFQ
+  // Show MLFQ bookkeeping when the MLFQ scheduler is enabled.
+  printk("PID  STATE   NAME             Q  SLICE  BOOST\n");
+#else
+  // Preserve the original xv6 process listing.
+  printk("PID  STATE   NAME\n");
+#endif
+
   for (p = proc; p < &proc[NPROC]; p++) {
     if (p->state == UNUSED)
       continue;
+
     if (p->state >= 0 && p->state < NELEM(states) && states[p->state])
       state = states[p->state];
     else
       state = "???";
+
+#ifdef SCHEDULER_MLFQ
+    printk("%d %s %s", p->pid, state, p->name);
+    printk(" %d %d %d", p->queue, p->slice_ticks,
+           p->ticks_since_boost);
+    printk("\n");
+#else
     printk("%d %s %s", p->pid, state, p->name);
     printk("\n");
+#endif
   }
 }
