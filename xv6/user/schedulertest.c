@@ -113,6 +113,63 @@ priority_test(void)
          (int)uptime());
 }
 
+// Test round-robin scheduling in Q3.
+//
+// Two long-running CPU-bound processes are created. Both processes
+// should eventually reach Q3. Since Q3 is the lowest-priority queue,
+// they should alternate after exhausting their 16-tick time slices.
+//
+// We avoid the 48-tick priority-boost boundary while starting the
+// test so that the observed Q3 behavior is not confused by a boost.
+static void
+q3_test(void)
+{
+  int pid;
+  int i;
+
+  printf("=== Q3 round-robin test ===\n");
+
+  // Avoid starting too close to a 48-tick priority boost.
+  while ((uptime() % 48) >= 24)
+    pause(1);
+
+  printf("Test starting at tick %d\n", (int)uptime());
+
+  // Create two long-running CPU-bound processes.
+  for (i = 0; i < 2; i++) {
+    pid = fork();
+
+    if (pid < 0) {
+      printf("q3 test: fork failed\n");
+      exit(1);
+    }
+
+    if (pid == 0) {
+      uint64 j;
+
+      printf("Q3 process %d (pid %d) started at tick %d\n",
+             i + 1, getpid(), (int)uptime());
+
+      // Long enough to reach Q3 and consume several Q3 slices.
+      for (j = 0; j < 1000000000ULL; j++) {
+        if ((j % 100000000ULL) == 0)
+          asm volatile("" ::: "memory");
+      }
+
+      printf("Q3 process %d (pid %d) finished at tick %d\n",
+             i + 1, getpid(), (int)uptime());
+      exit(0);
+    }
+  }
+
+  // Wait for both Q3 processes.
+  wait(0);
+  wait(0);
+
+  printf("=== Q3 round-robin test complete at tick %d ===\n",
+         (int)uptime());
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -122,6 +179,11 @@ main(int argc, char *argv[])
   // Run the dedicated strict-priority test when requested.
   if (argc == 2 && strcmp(argv[1], "priority") == 0) {
     priority_test();
+    exit(0);
+  }
+
+  if (argc == 2 && strcmp(argv[1], "q3") == 0) {
+    q3_test();
     exit(0);
   }
 
