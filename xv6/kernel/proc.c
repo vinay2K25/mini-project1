@@ -537,32 +537,29 @@ void
 scheduler(void)
 {
   struct proc *p;
-#ifdef SCHEDULER_MLFQ
+  int found;
+#if defined(SCHEDULER_MLFQ) || defined(SCHEDULER_FIFO)
   struct proc *chosen;
 #endif
   struct cpu *c = mycpu();
   c->proc = 0;
   for (;;) {
+    found = 0;
     // Enable interrupts so this CPU can receive timer/device interrupts.
     intr_on();
     intr_off();
-#ifdef SCHEDULER_MLFQ
-  // Perform a pending 48-tick priority boost before selecting
-  // the next process to run.
-  if (mlfq_boost_pending) {
-    mlfq_boost_pending = 0;
-    mlfq_priority_boost();
-  }
-#endif
-    int found = 0;
-#ifdef SCHEDULER_MLFQ
+
+#if defined(SCHEDULER_MLFQ)
+
     chosen = 0;
+
     // Find the highest-priority non-empty queue.
     // Within that queue, choose the process that has been waiting
     // the longest (smallest enqueue sequence number).
     for (int q = 0; q < 4 && chosen == 0; q++) {
       for (p = proc; p < &proc[NPROC]; p++) {
         acquire(&p->lock);
+
         if (p->state == RUNNABLE && p->queue == q) {
           if (chosen == 0 || p->enqueue_seq < chosen->enqueue_seq) {
             if (chosen != 0)
@@ -572,23 +569,64 @@ scheduler(void)
             continue;
           }
         }
+
         release(&p->lock);
       }
     }
+
     if (chosen != 0) {
       // Run the selected process.
       chosen->state = RUNNING;
       c->proc = chosen;
       swtch(&c->context, &chosen->context);
       c->proc = 0;
+
       // The process should have changed its state before returning here.
       release(&chosen->lock);
       found = 1;
     }
+
+#elif defined(SCHEDULER_FIFO)
+
+    chosen = 0;
+
+    // FIFO: choose the runnable process with the smallest PID.
+    // PIDs are allocated monotonically, so this corresponds to
+    // the earliest-created runnable process.
+    for (p = proc; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+
+      if (p->state == RUNNABLE) {
+        if (chosen == 0 || p->pid < chosen->pid) {
+          if (chosen != 0)
+            release(&chosen->lock);
+
+          chosen = p;
+          continue;
+        }
+      }
+
+      release(&p->lock);
+    }
+
+    if (chosen != 0) {
+      // Run the selected process.
+      chosen->state = RUNNING;
+      c->proc = chosen;
+      swtch(&c->context, &chosen->context);
+      c->proc = 0;
+
+      // The process should have changed its state before returning here.
+      release(&chosen->lock);
+      found = 1;
+    }
+
 #else
+
     // Original xv6 round-robin scheduler.
     for (p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
+
       if (p->state == RUNNABLE) {
         p->state = RUNNING;
         c->proc = p;
@@ -596,11 +634,14 @@ scheduler(void)
         c->proc = 0;
         found = 1;
       }
+
       release(&p->lock);
     }
+
 #endif
+
   if (found == 0)
-      asm volatile("wfi");
+    asm volatile("wfi");
   }
 }
 
