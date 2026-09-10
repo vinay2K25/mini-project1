@@ -493,6 +493,39 @@ mlfq_enqueue(struct proc *p)
 }
 #endif
 
+#ifdef SCHEDULER_MLFQ
+// Move every existing process to Q0 after a 48-tick boost.
+//
+// The caller must ensure that a boost is pending.
+static void
+mlfq_priority_boost(void)
+{
+  struct proc *p;
+
+  for (p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+
+    if (p->state != UNUSED) {
+      // Every process returns to the highest-priority queue.
+      p->queue = 0;
+
+      // Everyone receives a fresh time slice after the boost.
+      p->slice_ticks = 0;
+
+      // The boost resets this bookkeeping counter.
+      p->ticks_since_boost = 0;
+
+      // Reinsert processes in FIFO order at the boosted queue.
+      acquire(&mlfq_seq_lock);
+      p->enqueue_seq = ++mlfq_next_seq;
+      release(&mlfq_seq_lock);
+    }
+
+    release(&p->lock);
+  }
+}
+#endif
+
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
@@ -513,6 +546,14 @@ scheduler(void)
     // Enable interrupts so this CPU can receive timer/device interrupts.
     intr_on();
     intr_off();
+#ifdef SCHEDULER_MLFQ
+  // Perform a pending 48-tick priority boost before selecting
+  // the next process to run.
+  if (mlfq_boost_pending) {
+    mlfq_boost_pending = 0;
+    mlfq_priority_boost();
+  }
+#endif
     int found = 0;
 #ifdef SCHEDULER_MLFQ
     chosen = 0;
