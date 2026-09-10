@@ -186,14 +186,19 @@ kerneltrap()
 void
 clockintr()
 {
+  // The timer interrupt means that the currently running process
+  // has consumed one CPU tick.
+  if (mycpu()->proc != 0)
+    mycpu()->proc->run_ticks++;
+
   if (cpuid() == 0) {
     acquire(&tickslock);
     ticks++;
 
 #ifdef SCHEDULER_MLFQ
-  // Every 48 global ticks, request a priority boost.
-  if (ticks % 48 == 0)
-    mlfq_boost_pending = 1;
+    // Every 48 global ticks, request a priority boost.
+    if (ticks % 48 == 0)
+      mlfq_boost_pending = 1;
 #endif
 
     wakeup(&ticks);

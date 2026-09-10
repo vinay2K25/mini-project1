@@ -241,6 +241,102 @@ burst_test(void)
          (int)uptime());
 }
 
+// Compare FIFO, RR, and MLFQ using the same CPU-burst workload.
+//
+// Each child receives a different CPU-burst length. We record:
+//   - arrival: when the parent creates the child
+//   - first_run: when the child first gets to execute
+//   - completion: when the child finishes
+//
+// From these timestamps we can calculate:
+//   response   = first_run - arrival
+//   turnaround = completion - arrival
+//
+// Waiting time will be calculated later using kernel-side CPU
+// service-time accounting.
+static void
+comparison_test(void)
+{
+  int pid;
+  int i;
+
+  uint64 bursts[4] = {
+    50000000ULL,
+    100000000ULL,
+    200000000ULL,
+    400000000ULL
+  };
+
+  uint64 arrival[4];
+
+  printf("=== Scheduler comparison test ===\n");
+  printf("Test starting at tick %d\n", (int)uptime());
+
+  for (i = 0; i < 4; i++) {
+    // Record the approximate arrival tick immediately before fork.
+    arrival[i] = uptime();
+
+    pid = fork();
+
+    if (pid < 0) {
+      printf("comparison test: fork failed\n");
+      exit(1);
+    }
+
+    if (pid == 0) {
+      uint64 j;
+      uint64 first_run;
+      uint64 finish;
+      uint64 response;
+      uint64 turnaround;
+
+      uint64 service;
+      uint64 waiting;
+
+      // The first instructions executed by the child occur when
+      // the scheduler gives it CPU time.
+      first_run = uptime();
+
+      printf("Comparison process %d (pid %d): "
+             "arrival=%d first_run=%d response=%d\n",
+             i + 1, getpid(), (int)arrival[i],
+             (int)first_run,
+             (int)(first_run - arrival[i]));
+
+      // CPU-bound workload.
+      for (j = 0; j < bursts[i]; j++) {
+        if ((j % 100000000ULL) == 0)
+          asm volatile("" ::: "memory");
+      }
+
+      finish = uptime();
+      turnaround = finish - arrival[i];
+
+      response = first_run - arrival[i];
+
+      service = getrunticks();
+      waiting = turnaround - service;
+
+      printf("Comparison process %d (pid %d): "
+       "finish=%d response=%d turnaround=%d "
+       "service=%d waiting=%d\n",
+       i + 1, getpid(), (int)finish,
+       (int)response,
+       (int)turnaround,
+       (int)service,
+       (int)waiting);
+
+      exit(0);
+    }
+  }
+
+  for (i = 0; i < 4; i++)
+    wait(0);
+
+  printf("=== Scheduler comparison test complete at tick %d ===\n",
+         (int)uptime());
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -261,6 +357,12 @@ main(int argc, char *argv[])
   // Run the varying CPU-burst workload when requested.
   if (argc == 2 && strcmp(argv[1], "bursts") == 0) {
     burst_test();
+    exit(0);
+  }
+
+  // Run the common workload used for comparing FIFO, RR, and MLFQ.
+  if (argc == 2 && strcmp(argv[1], "comparison") == 0) {
+    comparison_test();
     exit(0);
   }
 

@@ -110,3 +110,11 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+// Return the total number of CPU timer ticks consumed by
+// the current process.
+uint64
+sys_getrunticks(void)
+{
+  return myproc()->run_ticks;
+}

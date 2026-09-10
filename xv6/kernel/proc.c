@@ -167,6 +167,9 @@ found:
   p->enqueue_seq = 0;
 #endif
 
+  // A newly allocated process has consumed no CPU time yet.
+  p->run_ticks = 0;
+
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0) {
     freeproc(p);
@@ -216,6 +219,10 @@ freeproc(struct proc *p)
   p->ticks_since_boost = 0;
   p->enqueue_seq = 0;
 #endif
+
+  // Clear CPU service-time accounting when the process is released.
+  p->run_ticks = 0;
+
   p->state = UNUSED;
 }
 
@@ -553,6 +560,13 @@ scheduler(void)
 
     chosen = 0;
 
+    // Perform the pending global priority boost before selecting
+    // the next process to run.
+    if (mlfq_boost_pending) {
+      mlfq_boost_pending = 0;
+      mlfq_priority_boost();
+    }
+
     // Find the highest-priority non-empty queue.
     // Within that queue, choose the process that has been waiting
     // the longest (smallest enqueue sequence number).
@@ -707,7 +721,8 @@ mlfq_tick(void)
 
   acquire(&p->lock);
 
-  // One timer tick of CPU time has been consumed by this process!
+  // Account for the MLFQ time slice separately from
+  // scheduler-independent CPU-time accounting.
   p->slice_ticks++;
 
   // Track CPU ticks consumed since the last priority boost.
@@ -957,7 +972,7 @@ procdump(void)
 
 #ifdef SCHEDULER_MLFQ
   // Show MLFQ bookkeeping when the MLFQ scheduler is enabled.
-  printk("PID  STATE   NAME             Q  SLICE  BOOST\n");
+  printk("PID  STATE   NAME             Q  SLICE  BOOST  RUN\n");
 #else
   // Preserve the original xv6 process listing.
   printk("PID  STATE   NAME\n");
@@ -974,8 +989,8 @@ procdump(void)
 
 #ifdef SCHEDULER_MLFQ
     printk("%d %s %s", p->pid, state, p->name);
-    printk(" %d %d %d", p->queue, p->slice_ticks,
-           p->ticks_since_boost);
+    printk(" %d %d %d %d", p->queue, p->slice_ticks,
+       p->ticks_since_boost, (int)p->run_ticks);
     printk("\n");
 #else
     printk("%d %s %s", p->pid, state, p->name);

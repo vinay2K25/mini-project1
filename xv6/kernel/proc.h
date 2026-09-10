@@ -91,11 +91,15 @@ struct proc {
 
 #ifdef SCHEDULER_MLFQ
   // MLFQ bookkeeping.
-  int queue;             // Current queue: 0 is highest priority, 3 is lowest!
-  int slice_ticks;       // Ticks consumed in the current queue's time slice!
-  int ticks_since_boost; // Ticks since the last priority boost!
-  uint64 enqueue_seq;    // Sequence number used to maintain FIFO order within a queue!
+  int queue;
+  int slice_ticks;
+  int ticks_since_boost;
+  uint64 enqueue_seq;
 #endif
+
+  // Total number of timer ticks during which this process
+  // has actually been running on the CPU.
+  uint64 run_ticks;
 
   // wait_lock must be held when using this:
   struct proc *parent; // Parent process
