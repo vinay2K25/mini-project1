@@ -170,6 +170,77 @@ q3_test(void)
          (int)uptime());
 }
 
+// Test MLFQ behavior with processes having different CPU-burst lengths.
+//
+// The processes deliberately perform different amounts of CPU work.
+// Shorter jobs should finish earlier, while longer jobs should
+// progressively move through the MLFQ queues.
+//
+// This workload is also suitable for generating the scheduler
+// timeline required in the project report.
+static void
+burst_test(void)
+{
+  int pid;
+  int i;
+
+  // Different CPU-burst lengths.
+  //
+  // The values are deliberately separated so that the processes
+  // exhibit noticeably different execution times.
+  uint64 bursts[4] = {
+    100000000ULL,
+    250000000ULL,
+    500000000ULL,
+    1000000000ULL
+  };
+
+  printf("=== Varying CPU-burst test ===\n");
+  printf("Test starting at tick %d\n", (int)uptime());
+
+  for (i = 0; i < 4; i++) {
+    pid = fork();
+
+    if (pid < 0) {
+      printf("burst test: fork failed\n");
+      exit(1);
+    }
+
+    if (pid == 0) {
+      uint64 j;
+      uint64 start;
+      uint64 finish;
+
+      start = uptime();
+
+      printf("Burst process %d (pid %d) started at tick %d\n",
+             i + 1, getpid(), (int)start);
+
+      // CPU-bound burst of the selected length.
+      for (j = 0; j < bursts[i]; j++) {
+        if ((j % 100000000ULL) == 0)
+          asm volatile("" ::: "memory");
+      }
+
+      finish = uptime();
+
+      printf("Burst process %d (pid %d) finished at tick %d "
+             "(CPU time %d ticks)\n",
+             i + 1, getpid(), (int)finish,
+             (int)(finish - start));
+
+      exit(0);
+    }
+  }
+
+  // Wait for all burst processes.
+  for (i = 0; i < 4; i++)
+    wait(0);
+
+  printf("=== Varying CPU-burst test complete at tick %d ===\n",
+         (int)uptime());
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -184,6 +255,12 @@ main(int argc, char *argv[])
 
   if (argc == 2 && strcmp(argv[1], "q3") == 0) {
     q3_test();
+    exit(0);
+  }
+
+  // Run the varying CPU-burst workload when requested.
+  if (argc == 2 && strcmp(argv[1], "bursts") == 0) {
+    burst_test();
     exit(0);
   }
 
