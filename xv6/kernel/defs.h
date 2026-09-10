@@ -108,6 +108,16 @@ int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
 
+#ifdef SCHEDULER_MLFQ
+// Account for one CPU tick and return 1 when the current
+// process's MLFQ time slice has expired.
+int             mlfq_tick(void);
+
+// Set when the global tick counter reaches a 48-tick
+// priority-boost boundary.
+extern int      mlfq_boost_pending;
+#endif
+
 // swtch.S
 void            swtch(struct context*, struct context*);
 

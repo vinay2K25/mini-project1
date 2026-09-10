@@ -49,6 +49,10 @@ uint64 mlfq_next_seq = 0;
 
 // Protects mlfq_next_seq when multiple CPUs enqueue processes at once.
 struct spinlock mlfq_seq_lock;
+
+// Set by the timer interrupt when a 48-tick priority boost is due.
+// The scheduler will perform the actual boost.
+int mlfq_boost_pending = 0;
 #endif
 
 // Allocate a page for each process's kernel stack.
