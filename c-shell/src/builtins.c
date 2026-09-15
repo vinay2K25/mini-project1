@@ -430,7 +430,8 @@ static bool parse_reveal_flag(const char *argument, bool *show_hidden, bool *rec
     if(argument[0] != '-' || argument[1] == '\0') {
         return false;
     }
-    for(size_t i = 1; argument[i] != 0; i++) {
+    // Missing '\0', had compared argument[i] to '0' instead of '\0'!
+    for(size_t i = 1; argument[i] != '\0'; i++) {
         // Show all files and dir, including hidden ones!
         if(argument[i] == 'a') {
             *show_hidden = true;
@@ -1087,6 +1088,9 @@ static void execute_ping(Token *tokens) {
     }
     errno = 0;
     char *end;
+    // *end will point to the first non-digit character after the last digit parsed!
+    // IF *end == '\0', then it means the entire string was a number and is valid, else not! 
+    // ERANGE macro indicates that the result is too large!
     unsigned long long signal_value = strtoull(signal_string, &end, 10);
     if(errno == ERANGE || *end != '\0' || signal_value > ULLONG_MAX) {
         printf("ping: invalid syntax\n");
@@ -1122,25 +1126,30 @@ static const char *spy_file_type(const char *path) {
     if(S_ISDIR(information.st_mode)) {
         return "DIR";
     }
+    // Character device - the driver communicates with it by sending and receiving individual characters from it!
     if(S_ISCHR(information.st_mode)) {
         return "CHR";
     }
+    // Block device - the driver communicates with it by sending and receiving blocks of data from it!
     if(S_ISBLK(information.st_mode)) {
         return "BLK";
     }
+    // FIFO/Named pipes - Similar to reg pipes, but do not take up space on hard disk except some meta-data and not not use the CPU!
     if(S_ISFIFO(information.st_mode)) {
         return "FIFO";
     }
+    // Socket - Provide inter-process networking! 
     if(S_ISSOCK(information.st_mode)) {
         return "SOCK";
     }
-    return "UNKWOWN";
+    return "UNKNOWN";
 }
 
 // Print one special /proc entry such as cwd or txt!
 static void spy_print_special(pid_t pid, const char *fd_name, const char *proc_name) {
     char link_path[PATH_MAX];
     char target[PATH_MAX];
+    // Here a symbolic link is created! We'll then examine the type of the target the symbolic link points to!
     int written = snprintf(link_path, sizeof(link_path), "/proc/%ld/%s", (long)pid, proc_name);
     if(written < 0 || (size_t)written >= sizeof(link_path)) {
         return;
@@ -1223,6 +1232,7 @@ static void spy_print_fds(pid_t pid) {
     if(directory == NULL) {
         return;
     }
+    // dirfd will return the fd of the mentioned dir! In this case, we're obtaining the fd for the curr dir!
     int directory_fd = dirfd(directory);
     struct dirent *entry;
     while((entry = readdir(directory)) != NULL) {
@@ -1242,6 +1252,7 @@ static void spy_print_fds(pid_t pid) {
         }
         errno = 0;
         char *end;
+        // strtol converts string into long int!
         long fd_number = strtol(entry->d_name, &end, 10);
         if(errno == ERANGE || *end != '\0' || fd_number < 0) {
             continue;

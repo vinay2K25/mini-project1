@@ -23,6 +23,7 @@ typedef enum {
 } ProcessState;
 
 typedef struct {
+    // The first proc in the proc grp is taken to be the leader in this code-base!
     pid_t pid;
     pid_t pgid;
     pid_t *pids;
@@ -89,6 +90,7 @@ static void process_sigchld() {
             }
             pid_t pid = background_jobs[i].pids[j];
             while(true) {
+                // WNOHANG instructs waitpid() to report the status of the child, without making the parent wait for the child! 0 indicates waitpid() did not find any state change in the child!  
                 pid_t result = waitpid(pid, &status, WNOHANG | WUNTRACED); 
                 if(result == 0) {
                     break;
@@ -112,6 +114,7 @@ static void process_sigchld() {
                 else if(WIFSTOPPED(status)) {
                     background_jobs[i].states[j] = PROCESS_STOPPED;
                 }
+                // Proc began running from a stopped state! 
                 else if(WIFCONTINUED(status)) {
                     background_jobs[i].states[j] = PROCESS_RUNNING;
                 }
@@ -132,6 +135,7 @@ static void process_sigchld() {
     }
 }
 
+// In-active job indicates unused slot in the background_jobs arr!
 static int find_free_job_slot() {
     for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
         if(!background_jobs[i].active) {
@@ -184,6 +188,8 @@ static bool add_background_job(pid_t pid, pid_t pgid, const pid_t *pids, size_t 
             background_jobs[slot].pids = NULL;
             return false;
         }
+        // Consider cat a.txt | grep foo | echo hello as an example!
+        // The cmds arr will store [cat, grep, foo]!
         strcpy(background_jobs[slot].commands[i], current->value);
         if(i + 1 < process_count) {
             while(current != NULL && current->type != TOKEN_PIPE) {
@@ -212,6 +218,7 @@ static bool add_background_job(pid_t pid, pid_t pgid, const pid_t *pids, size_t 
 void print_completed_background_jobs() {
     process_sigchld();
     for(int i = 0; i < MAX_BACKGROUND_PROCESSES; i++) {
+        // In-active job indicates that the slot is un-used/free!
         if(!background_jobs[i].active || !background_jobs[i].completed) {
             continue;
         }
@@ -407,6 +414,7 @@ static void resume_background(BackgroundJob *job) {
     if(job->completed || !job->active || !job_has_live_processes(job)) {
         return;
     }
+    // Negative sign indicates that the SIGCONT signal is sent to the entire proc grp, not just a single proc!
     if(kill(-job->pgid, SIGCONT) == -1) {
         return;
     }
@@ -843,6 +851,7 @@ static bool open_input_files(Token *tokens, int **input_fds, size_t *input_count
 }
 
 // Parent will concat all the files!
+// This will write all bytes to a fd, and break appropriately if an error occurs while writing the bytes!
 static bool write_all(int fd, const char *buffer, size_t count) {
     size_t written = 0;
     while(written < count) {
@@ -862,6 +871,7 @@ static bool write_all(int fd, const char *buffer, size_t count) {
 }
 
 // We'll copy the file into pipe, then change the fd for stdin to one end of the pipe!
+// We're first transfering the contents of the input fd into a buffer arr, then tranferring the content from buffer arr to the pipe_fd! The process at the left of '<' can then read from this pipe instead of stdin!
 static bool copy_file_to_pipe(int input_fd, int pipe_fd) {
     char buffer[4096];
     while(true) {
@@ -918,12 +928,17 @@ static bool open_output_files(Token *tokens, int **output_fds, size_t *output_co
             int flags;
             // > overwrites the cont of the file, while >> simply appends to the file!
             // Incase the file does not exist, we must creat it!
+            // O_TRUNC flag will erase the contents of the file and then open it!
             if(current->type == TOKEN_GT) {
                 flags = O_WRONLY | O_CREAT | O_TRUNC;
             }
+            // O_APPEND will not erase the contents of the file and open the file in append mode!
             else {
                 flags = O_WRONLY | O_CREAT | O_APPEND;
             }
+            // 0644 indicates the permissions for the file!
+            // 4 = r, 2 = w, 1 = x!
+            // 0abc, a = owner, b = group, c = others!
             int fd = open(filename->value, flags, 0644);
             if(fd == -1) {
                 for(size_t i = 0; i < index; i++) {
@@ -946,6 +961,7 @@ static bool open_output_files(Token *tokens, int **output_fds, size_t *output_co
 }
 
 // Writing the same data to every output redir targ!
+// a > b.txt >> c.txt > d.txt will write a to all three files!
 static bool write_to_all_outputs(int *output_fds, size_t output_count, const char *buffer, size_t count) {
     for(size_t i = 0; i < output_count; i++) {
         if(!write_all(output_fds[i], buffer, count)) {
@@ -1517,6 +1533,7 @@ static bool execute_external(Token *tokens, bool background) {
         }
     }
 
+    // To prevent race condition b/w parent and the sigchld handler - after forking, if the child terminates too quickly, then the sigchld handler tries to remove the child from the bg proc list, but the parent hasn't added the child to the bg proc list yet!
     sigset_t old_mask;
     if(background) {
         block_sigchld(&old_mask);
@@ -1546,11 +1563,16 @@ static bool execute_external(Token *tokens, bool background) {
     }
     if(child == 0) {
         reset_child_signals();
+        // setpgid(a, b) = Put pid a into proc group with pgid b!
+        // setpgid(0, b) = Put calling proc into proc group with pgid b!
+        // setpgid(a, 0) = Put pid a into proc group with pgid a!
+        // setpgid(0, 0) = Put calling proc into a proc group with pgid same as it's pid! 
         if(setpgid(0, 0) == -1) {
             perror("setpgid");
             _exit(EXIT_FAILURE);
         }
 
+        // Unblock sigchld to allow the child to finish exec and terminate now!
         if(background) {
             unblock_sigchld(&old_mask);
         }
@@ -1576,6 +1598,7 @@ static bool execute_external(Token *tokens, bool background) {
         }
 
         if(background && input_count == 0) {
+            // Set the bg proc's stdin to be the /dev/null file on Linux, it won't accidently read stdin from the terminal then!
             int null_fd = open("/dev/null", O_RDONLY);
             if(null_fd == -1) {
                 _exit(EXIT_FAILURE);
@@ -1588,6 +1611,7 @@ static bool execute_external(Token *tokens, bool background) {
         }
 
         // The child no longer requires the file desc!
+        // dup2 has already changed stdin/stdout to the appropriate file desc!
         for(size_t i = 0; i < input_count; i++) {
             close(input_fds[i]);
         }
@@ -1610,6 +1634,7 @@ static bool execute_external(Token *tokens, bool background) {
         close(input_pipe[0]);
         bool write_success = true;
         for(size_t i = 0; i < input_count; i++) {
+            // Content from every file desc's file is put into input_pipe[1]!
             if(!copy_file_to_pipe(input_fds[i], input_pipe[1])) {
                 write_success = false;
                 break;
@@ -1637,6 +1662,7 @@ static bool execute_external(Token *tokens, bool background) {
                 }
                 break;
             }
+            // Content stored in the output pipe is written all file desc's files!
             if(!write_to_all_outputs(output_fds, output_count, buffer, (size_t)bytes_read)) {
                 break;
             }
@@ -1651,6 +1677,7 @@ static bool execute_external(Token *tokens, bool background) {
         if(!add_background_job(child, child, &child, 1, tokens, command_string, PROCESS_RUNNING, true)) {
             kill(child, SIGTERM);
         }
+        // Can safely unblock sigchld since child proc was added to bg proc list!
         unblock_sigchld(&old_mask);
     }   
     else {
@@ -1660,6 +1687,7 @@ static bool execute_external(Token *tokens, bool background) {
         if(tcsetpgrp(shell_terminal, child) == -1) {
             perror("tcsetpgrp");
         }
+        // WUNTRACED tells if the child proc was stopped/terminated, not just whether it terminated or not! 
         while(waitpid(child, &status, WUNTRACED) == -1) {
             if(errno == EINTR) {
                 continue;
@@ -1675,6 +1703,7 @@ static bool execute_external(Token *tokens, bool background) {
             printf("\n");
         }
         foreground_running = 0;
+        // Once the foreground job is stopped [not terminated], we add it as a background proc and print out a msg saying it was stopped!
         if(WIFSTOPPED(status)) {
             // Move to a new line after Control+Z is printed as ^Z!
             printf("\n");

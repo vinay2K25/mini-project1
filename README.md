@@ -27,6 +27,20 @@ For the MLFQ scheduler:
 make qemu SCHEDULER=MLFQ
 ```
 
+# Test options for xv6:
+Test general MLFQ behaviour using four identical CPU-bound processes, including queue demotion and priority boosting:
+```bash
+schedulertest
+```
+Test scheduler behaviour with four CPU-bound processes having different burst lengths:
+```bash
+schedulertest bursts
+```
+Use same workload to compare FIFO, RR and MLFQ using response, turnaround and waiting times:
+```bash
+schedulertest comparison
+```
+
 # Project directory structure:
 mini-project1/
 ├── c-shell/
