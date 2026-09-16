@@ -85,6 +85,9 @@ usertrap(void)
   // On a timer interrupt, MLFQ accounts for the CPU tick and yields only when the current process has exhausted its time-slice!
   // Without MLFQ, preserve xv6's original round-robin behavior!
 #ifdef SCHEDULER_MLFQ
+// On timer interrupt, we update the proc's state!
+// If the proc has consumed it's time slice, demote it and run the best proc!
+// Else if needs to give up Ctrl of the CPU due to a better proc in a higher priori queue, run the better proc!
   if (which_dev == 2 && myproc() != 0 && mlfq_tick())
     yield();
 #elif defined(SCHEDULER_FIFO)

@@ -4,6 +4,8 @@
 
 // Keep the CPU busy for a while so the process consumes
 // multiple MLFQ time slices and gets demoted through the queues.
+
+// We're basically keeping the CPU available for a long time so that the MLFQ behaviour is clearly visible!
 static void
 cpu_burst(int id)
 {

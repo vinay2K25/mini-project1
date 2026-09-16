@@ -33,6 +33,7 @@ static void mlfq_enqueue(struct proc *p);
 
 // Return 1 if a runnable process exists in a higher-priority
 // queue than the supplied queue.
+// If there's atleast one proc in the higher priori queue, then it'll be run instead of the curr proc in the lower queue!
 static int mlfq_higher_priority_runnable(int queue);
 #endif
 
@@ -48,6 +49,8 @@ struct spinlock wait_lock;
 uint64 mlfq_next_seq = 0;
 
 // Protects mlfq_next_seq when multiple CPUs enqueue processes at once.
+// The four priori queues are common to all CPUs!
+// This lock allows only one CPU to update the mlfq_next_seq var at a time, to prevent two CPUs from accidently allocating the same mlfq_next_seq val to each of their concerned procs!
 struct spinlock mlfq_seq_lock;
 
 // Set by the timer interrupt when a 48-tick priority boost is due.
@@ -491,6 +494,7 @@ kwait(uint64 addr)
 static void
 mlfq_enqueue(struct proc *p)
 {
+  // Only one CPU can update the mlfq_next_seq var at a time!
   acquire(&mlfq_seq_lock);
   p->enqueue_seq = ++mlfq_next_seq;
   release(&mlfq_seq_lock);
@@ -510,6 +514,7 @@ mlfq_priority_boost(void)
   struct proc *p;
 
   for (p = proc; p < &proc[NPROC]; p++) {
+    // Protecting the proc itself - only one CPU should update the proc's state at a time!
     acquire(&p->lock);
 
     if (p->state != UNUSED) {
@@ -546,6 +551,10 @@ scheduler(void)
   struct proc *p;
   int found;
 #if defined(SCHEDULER_MLFQ) || defined(SCHEDULER_FIFO)
+// Best runnable proc found so far!
+// For FIFO, it'll be decided just via the enqueue_seq of the proc!
+// For MLFQ, it'll first be decided by priori queue!
+// If tie in the priori queue, then check via enqueue_seq of the procs! 
   struct proc *chosen;
 #endif
   struct cpu *c = mycpu();
@@ -576,6 +585,8 @@ scheduler(void)
 
         if (p->state == RUNNABLE && p->queue == q) {
           if (chosen == 0 || p->enqueue_seq < chosen->enqueue_seq) {
+            // If chosen was already set to some proc before, then it must be locked!
+            // We need to release the lock to update chosen! 
             if (chosen != 0)
               release(&chosen->lock);
 
@@ -591,12 +602,17 @@ scheduler(void)
     if (chosen != 0) {
       // Run the selected process.
       chosen->state = RUNNING;
+      // Proc running on CPU is set to the chosen proc!
       c->proc = chosen;
+      // Context switch occurs - CPU switches context from the scheduler to the chosen proc!
       swtch(&c->context, &chosen->context);
+      // Once chosen proc was run successfully and finished it's time slice, no proc is running on the CPU! 
       c->proc = 0;
 
       // The process should have changed its state before returning here.
+      // The CPUs can now modify the chosne proc's state freely!
       release(&chosen->lock);
+      // We'd found a runnable proc and ran it!
       found = 1;
     }
 
@@ -694,6 +710,12 @@ sched(void)
 // current process may hold its own lock. Therefore, do not acquire
 // any process locks here; doing so could create a lock-order
 // deadlock with the scheduler.
+
+// Basically, when this func is called, some proc might already be locked to a particular CPU!
+// Then if a different CPU tries to acquire a lock to the same proc, it has to wait until the prev CPU releases the proc lock!
+// This new CPU therefore may end up waiting forever!
+// That's why, we don't try and acquire a proc lock here!
+// And anyway, we're not modifying any proc data! 
 static int
 mlfq_higher_priority_runnable(int queue)
 {
@@ -713,6 +735,7 @@ mlfq_higher_priority_runnable(int queue)
 int
 mlfq_tick(void)
 {
+  // Ret pointr to proc currently running on the CPU!
   struct proc *p = myproc();
   int slice_expired = 0;
 
@@ -751,6 +774,7 @@ mlfq_tick(void)
 
     slice_expired = 1;
   }
+  // Let the current proc consume it's time-slice, but don't demote it!
   else if (mlfq_higher_priority_runnable(p->queue)) {
     // A higher-priority process is runnable, so give it the CPU
     // at the next scheduling point without changing our queue.
@@ -774,6 +798,7 @@ yield(void)
 #ifdef SCHEDULER_MLFQ
   // Voluntary yield keeps the process in the same queue but moves it
   // to the tail of that queue with a fresh time slice.
+  // If the proc gives up the CPU voluntarily, we reward it by keeping it in the same queue!
   mlfq_enqueue(p);
 #endif
 
@@ -862,9 +887,11 @@ wakeup(void *chan)
       // If this waiting process has gotten so far as to actually
       // go to sleep, also set it back to RUNNING.
         if (p->state == SLEEPING) {
-          p->state = RUNNABLE;
+          p->state = RUNNABLE;          
 #ifdef SCHEDULER_MLFQ
   // A waking process re-enters the tail of its current queue.
+  // It shouldn't be penalized for sleeping, since it gives up ctrl of the CPU!
+  // But it also shouldn't be allowed to again come at the front of the queue and begin exec!
   mlfq_enqueue(p);
 #endif
         }
@@ -972,6 +999,7 @@ procdump(void)
 
 #ifdef SCHEDULER_MLFQ
   // Show MLFQ bookkeeping when the MLFQ scheduler is enabled.
+  // This is only displayed when the Ctrl+P keybind is hit by the usr!
   printk("PID  STATE   NAME             Q  SLICE  BOOST  RUN\n");
 #else
   // Preserve the original xv6 process listing.
@@ -988,6 +1016,7 @@ procdump(void)
       state = "???";
 
 #ifdef SCHEDULER_MLFQ
+// run_ticks denotes the total CPU ticks consumed by the proc in it's lifetime!
     printk("%d %s %s", p->pid, state, p->name);
     printk(" %d %d %d %d", p->queue, p->slice_ticks,
        p->ticks_since_boost, (int)p->run_ticks);

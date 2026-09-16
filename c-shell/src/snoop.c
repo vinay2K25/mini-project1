@@ -581,7 +581,9 @@ static void print_summary(SyscallEntry *entries, size_t count) {
     }
 }
 
+// This function resumes the execution of the tracee once the tracer has recorded details of the tracee!
 static bool continue_tracee(pid_t pid, int signal_number, int *status) {
+    // PTRACE_SYSCALL allows the tracee (proc being tracked) to resume exec and run until the next syscall occurs!
     if (ptrace(PTRACE_SYSCALL, pid, NULL, (void *)(long)signal_number) == -1) {
         return false;
     }
@@ -612,9 +614,11 @@ static bool snoop_command_mode(Token *tokens) {
         return false;
     }
     if (child == 0) {
+        // Child colunteers to be traced by the parent proc!
         if (ptrace(PTRACE_TRACEME, 0, NULL, NULL) == -1) {
             _exit(EXIT_FAILURE);
         }
+        // Child stops itself so parent proc can set up tracing!
         if (raise(SIGSTOP) != 0) {
             _exit(EXIT_FAILURE);
         }
@@ -632,11 +636,12 @@ static bool snoop_command_mode(Token *tokens) {
     if (!WIFSTOPPED(status)) {
         return false;
     }
+    // Parent proc can get additional info that the child proc stopped at a syscall via waitpid!
     if (ptrace(PTRACE_SETOPTIONS, child, NULL, PTRACE_O_TRACESYSGOOD) == -1) {
         perror("ptrace");
         return false;
     }
-
+    // Child can resume and exec until next syscall boundary!
     if (ptrace(PTRACE_SYSCALL, child, NULL, NULL) == -1) {
         perror("ptrace");
         return false;
@@ -659,13 +664,17 @@ static bool snoop_command_mode(Token *tokens) {
         long current_syscall = -1;
         struct timespec syscall_start;
         while (true) {
+            // Which signal caused child proc to stop?
             int stop_signal = WSTOPSIG(status);
+            // Is it a syscall?
             if (stop_signal == (SIGTRAP | 0x80)) {
                 struct user_regs_struct registers;
+                // Parent proc reads the registers of the child proc!
                 if (ptrace(PTRACE_GETREGS, child, NULL, &registers) == -1) {
                     free(entries);
                     return false;
                 }
+                // Entering the syscall - record the time = start_time! 
                 if (at_entry) {
                     current_syscall = (long)registers.orig_rax;
                     if (clock_gettime(CLOCK_MONOTONIC, &syscall_start) == -1) {
@@ -674,6 +683,7 @@ static bool snoop_command_mode(Token *tokens) {
                     }
                     at_entry = false;
                 }
+                // Exiting the syscall - record the time = end_time! We can then calc the duration of the syscall made by the child proc!
                 else {
                     struct timespec syscall_end;
                     if (clock_gettime(CLOCK_MONOTONIC, &syscall_end) == -1) {
@@ -693,6 +703,8 @@ static bool snoop_command_mode(Token *tokens) {
                 }
             }
             else {
+                // SIGTRAP indicates the child proc has hit a debugging point, namely, the syscall boundary!
+                // The parent proc must not accidently consume any signals that the child proc was meant to receive!
                 int signal_to_deliver = (stop_signal == SIGTRAP) ? 0 : stop_signal;
                 if (!continue_tracee(child, signal_to_deliver, &status)) {
                     free(entries);
@@ -710,10 +722,12 @@ static bool snoop_command_mode(Token *tokens) {
 }
 
 static bool snoop_pid_mode(pid_t pid) {
+    // Instead of forking and creating a new child proc like we did in snoop_command_mode(), we're instead tracing an already existing proc!
     if (ptrace(PTRACE_ATTACH, pid, NULL, NULL) == -1) {
         printf("snoop: no such process\n");
         return true;
     }
+    // After the proc is attached for tracing, it must stop so that the tracer can set up mechanisms for tracing!
     int status;
     while (waitpid(pid, &status, 0) == -1) {
         if (errno == EINTR) {
@@ -722,6 +736,7 @@ static bool snoop_pid_mode(pid_t pid) {
         ptrace(PTRACE_DETACH, pid, NULL, NULL);
         return false;
     }
+    // If proc failed to stop, we detach and don't trace it!
     if (!WIFSTOPPED(status)) {
         ptrace(PTRACE_DETACH, pid, NULL, NULL);
         return false;

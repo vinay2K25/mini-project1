@@ -94,6 +94,8 @@ struct proc {
   int queue;
   int slice_ticks;
   int ticks_since_boost;
+  // Tie-breaker - say A, B and C all are ready in queue 0, then we run whichever entered the queue first and has a smaller enqueue_seq val!
+  // If enqueue_seq for A = 10, C = 14 and B = 27; we run A, then C and then B!
   uint64 enqueue_seq;
 #endif
 

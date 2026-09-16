@@ -27,6 +27,7 @@ int main()
                 if(!eof_seen) {
                     printf("cshell: there are stopped jobs\n");
                     eof_seen = true;
+                    // Clear EOF/err state of stdin so we can read from it again!
                     clearerr(stdin);
                     continue;
                 }

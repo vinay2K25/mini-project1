@@ -285,6 +285,8 @@ static void resume_foreground(BackgroundJob *job, unsigned int timeout, bool has
     }
     foreground_running = 1;
     printf("%s\n", job->command);
+    // old_alarm_action will save the configuration of SIGALRM before it's temporarily changed to handle the foreground proc!
+    // alarm_action calls the alarm handler when the timer runs out!
     struct sigaction old_alarm_action;
     struct sigaction alarm_action;
     bool alarm_installed = false;
@@ -344,7 +346,10 @@ static void resume_foreground(BackgroundJob *job, unsigned int timeout, bool has
         }
     }
     if(timed_out) {
+        // SIGTERM can be interpreted by the proc it's sent to - It allows the proc to close all open resources, handle any on-going requests before terminating!
+        // In short, it allows graceful termination of the proc unlike SIGKILL!
         if(kill(-job->pgid, SIGTERM) == -1) {
+            // ESRCH indicates no such proc exists!
             if(errno != ESRCH) {
                 perror("kill");
             }
@@ -368,6 +373,7 @@ static void resume_foreground(BackgroundJob *job, unsigned int timeout, bool has
     }
     if(alarm_installed) {
         alarm(0);
+        // Restoring the old alarm state!
         if(sigaction(SIGALRM, &old_alarm_action, NULL) == -1) {
             perror("sigaction");
         }
@@ -414,7 +420,7 @@ static void resume_background(BackgroundJob *job) {
     if(job->completed || !job->active || !job_has_live_processes(job)) {
         return;
     }
-    // Negative sign indicates that the SIGCONT signal is sent to the entire proc grp, not just a single proc!
+    // Negative sign indicates that the SIGCONT (Resume execution) signal is sent to the entire proc grp, not just a single proc!
     if(kill(-job->pgid, SIGCONT) == -1) {
         return;
     }
@@ -579,6 +585,7 @@ void print_activities() {
             if(!background_jobs[i].active) {
                 continue;
             }
+            // Jobs are then ordered by increasing job nums!
             if(background_jobs[i].job_number != number) {
                 continue;
             }
@@ -624,6 +631,7 @@ void shutdown_executor() {
             continue;
         }
         if(background_jobs[i].pid > 0) {
+            // SIGHUP tells the proc/proc grp that the shell that started them has terminated, so they too need to terminate!
             kill(-background_jobs[i].pgid, SIGHUP);
         }
     }
