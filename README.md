@@ -41,25 +41,6 @@ Use same workload to compare FIFO, RR and MLFQ using response, turnaround and wa
 schedulertest comparison
 ```
 
-# Project directory structure:
-mini-project1/
-├── c-shell/
-│   ├── src/
-│   ├── include/
-│   └── Makefile
-├── xv6/
-│   ├── user/
-│   ├── mkfs/
-│   ├── kernel/
-|   ├── graph.py
-|   ├── LICENSE
-│   ├── Makefile
-|   ├── README.md
-|   ├── test-xv6.py
-│   └── report.pdf
-├── AI-usage.pdf
-└── README.md
-
 # Design choices:
 ## C-Shell
 1. Command parsing: Input is tokenized into commands and arguments, with special handling for operators such as ;, |, <, >, >>, and &. Built-in commands are handled by the shell itself, while external commands are executed using fork()/exec().
